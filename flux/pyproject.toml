@@ -1,58 +1,94 @@
 [build-system]
-requires = ["setuptools", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "deforum-flux"
-version = "0.0.1"
-description = "Flux backend for Deforum"
-authors = [{name = "Deforum Inc", email = "hello@deforum.io"}]
-license = "MIT"  # Changed from {text = "MIT"}
+version = "0.1.0"
+description = "Motion-aware video generation for FLUX image models"
 readme = "README.md"
-requires-python = ">=3.12"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Koshi", email = "koshi@glitchcandies.studio" }
+]
+keywords = [
+    "diffusion",
+    "flux",
+    "deforum",
+    "animation",
+    "video",
+    "ai",
+    "generative",
+    "black-forest-labs",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Multimedia :: Video",
+]
+
 dependencies = [
-    "torch",
-    "torchvision",
-    "torchaudio",
-    "accelerate",
-    "einops",
-    "fire",
-    "huggingface-hub",
-    "safetensors",
-    "sentencepiece",
-    "transformers",
-    "tokenizers",
-    "protobuf",
-    "requests",
-    "ruff",
-    "opencv-python",
+    "torch>=2.0.0",
+    "diffusers>=0.25.0",
+    "transformers>=4.36.0",
+    "accelerate>=0.25.0",
+    "pillow>=10.0.0",
+    "numpy>=1.24.0",
+    "tqdm>=4.65.0",
 ]
 
 [project.optional-dependencies]
-tensorrt = [
-    "tensorrt-cu12",
-    "colored",
-    "onnx",
-    "onnxruntime",
-    "onnxruntime-gpu",
-    "onnx-graphsurgeon",
-    "polygraphy",
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+video = [
+    "opencv-python>=4.8.0",
 ]
 
 [project.urls]
-Homepage = "https://github.com/deforum/flux"
-Repository = "https://github.com/deforum/flux"
+Homepage = "https://github.com/koshimazaki/deforum-flux"
+Documentation = "https://github.com/koshimazaki/deforum-flux#readme"
+Repository = "https://github.com/koshimazaki/deforum-flux"
+Issues = "https://github.com/koshimazaki/deforum-flux/issues"
 
-[tool.setuptools]
-package-dir = {"" = "src"}
+[tool.hatch.build.targets.wheel]
+packages = ["src/deforum_flux"]
 
-[tool.setuptools.packages.find]
-where = ["src"]
-
-[tool.setuptools.package-data]
-flux = [
-    "LICENSE",
-    "LICENSE-FLUX1-dev.md",
-    "LICENSE-FLUX1-schnell.md",
-    "NOTICE",
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/examples",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+addopts = "-v --tb=short"
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "W", "I", "N", "B", "C4"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_ignores = true
+ignore_missing_imports = true
