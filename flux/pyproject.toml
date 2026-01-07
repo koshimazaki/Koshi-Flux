@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deforum-flux"
+version = "0.0.1"
+description = "Flux backend for Deforum"
+authors = [{name = "Deforum Inc", email = "hello@deforum.io"}]
+license = "MIT"  # Changed from {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "torch",
+    "torchvision",
+    "torchaudio",
+    "accelerate",
+    "einops",
+    "fire",
+    "huggingface-hub",
+    "safetensors",
+    "sentencepiece",
+    "transformers",
+    "tokenizers",
+    "protobuf",
+    "requests",
+    "ruff",
+    "opencv-python",
+]
+
+[project.optional-dependencies]
+tensorrt = [
+    "tensorrt-cu12",
+    "colored",
+    "onnx",
+    "onnxruntime",
+    "onnxruntime-gpu",
+    "onnx-graphsurgeon",
+    "polygraphy",
+]
+
+[project.urls]
+Homepage = "https://github.com/deforum/flux"
+Repository = "https://github.com/deforum/flux"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+flux = [
+    "LICENSE",
+    "LICENSE-FLUX1-dev.md",
+    "LICENSE-FLUX1-schnell.md",
+    "NOTICE",
+]

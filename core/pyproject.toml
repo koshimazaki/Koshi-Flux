@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deforum"
+version = "0.2.1"
+description = "AI generation protocol and CLI tool"
+authors = [{name = "Deforum Inc", email = "hello@deforum.io"}]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+flux = ["deforum-flux"]
+
+[project.urls]
+Homepage = "https://github.com/deforum/core"
+Repository = "https://github.com/deforum/core"
