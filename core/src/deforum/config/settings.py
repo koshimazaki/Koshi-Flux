@@ -9,10 +9,12 @@ single source of truth for all configuration settings.
 
 import os
 import json
+import logging
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from pathlib import Path
-import torch
+
+logger = logging.getLogger(__name__)
 
 # Unified Deforum configuration - merges Config and DeforumConfig
 
@@ -128,6 +130,10 @@ class Config:
     # ===== SECURITY SETTINGS =====
     api_key_required: bool = False
     api_key: Optional[str] = None
+
+    # ===== TESTING SETTINGS =====
+    skip_model_loading: bool = False
+    allow_mocks: bool = False
     
 
     def __post_init__(self):
@@ -157,13 +163,21 @@ class Config:
             self.enable_cpu_offload = False  # Keep models in GPU memory
             self.memory_efficient = True
             
-        print(f"Config initialized - device: {self.device}, animation_mode: {self.animation_mode}")
+        logger.debug(f"Config initialized - device: {self.device}, animation_mode: {self.animation_mode}")
     
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert config to dictionary."""
+    # Sensitive fields that should not be serialized
+    _SENSITIVE_FIELDS = frozenset({"api_key"})
+
+    def to_dict(self, include_sensitive: bool = False) -> Dict[str, Any]:
+        """Convert config to dictionary.
+
+        Args:
+            include_sensitive: If True, include sensitive fields like api_key
+        """
         return {
-            field.name: getattr(self, field.name) 
+            field.name: getattr(self, field.name)
             for field in self.__dataclass_fields__.values()
+            if include_sensitive or field.name not in self._SENSITIVE_FIELDS
         }
     
     @classmethod
@@ -268,7 +282,7 @@ def update_config(updates: Dict[str, Any]) -> None:
         if hasattr(DEFAULT_CONFIG, key):
             setattr(DEFAULT_CONFIG, key, value)
         else:
-            print(f"Warning: Unknown configuration key: {key}") 
+            logger.warning(f"Unknown configuration key: {key}") 
 
 
 # ===== CONFIGURATION PRESETS =====

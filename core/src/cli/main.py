@@ -6,19 +6,17 @@ Main CLI for Deforum Flux
 
 import argparse
 import sys
-import os
-import json
 import time
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import List
 
-from deforum.config.settings import Config, get_preset, DeforumConfig
+from deforum.config.settings import Config, get_preset
 from deforum_flux.bridge import FluxDeforumBridge
+from deforum_flux.bridge.parameter_adapter import FluxDeforumParameterAdapter
 from deforum.core.logging_config import setup_logging
 from deforum.core.exceptions import DeforumException
 from deforum.utils.file_utils import FileUtils
 from deforum.utils.validation import InputValidator
-from .parameter_adapter import FluxDeforumParameterAdapter
 
 
 class FluxDeforumCLI:
@@ -258,9 +256,9 @@ Examples:
         
         return config.update(**overrides) if overrides else config
     
-    def create_deforum_config(self, args: argparse.Namespace) -> DeforumConfig:
-        """Create Deforum configuration from arguments."""
-        return DeforumConfig(
+    def create_animation_config(self, args: argparse.Namespace) -> Config:
+        """Create animation configuration from arguments."""
+        return Config(
             max_frames=args.frames,
             zoom=args.zoom,
             angle=args.angle,
@@ -338,7 +336,7 @@ Examples:
             # Handle test mode
             if args.test:
                 frames = self.generate_test_animation(args)
-                print(f"\n ++[√]++ Test animation completed!")
+                print("\n ++[√]++ Test animation completed!")
                 print(f"Generated {len(frames)} frames in {args.output}")
                 
                 if args.video:
@@ -355,23 +353,23 @@ Examples:
             
             # Create configuration
             config = self.create_config_from_args(args)
-            deforum_config = self.create_deforum_config(args)
-            
-            print(f"Configuration:")
+            motion_config = self.create_animation_config(args)
+
+            print("Configuration:")
             print(f"  Model: {config.model_name}")
             print(f"  Device: {config.device}")
             print(f"  Resolution: {config.width}x{config.height}")
             print(f"  Steps: {config.steps}")
             print(f"  Frames: {config.max_frames}")
-            
+
             # Initialize bridge
-            print(f"\n🔧 Initializing Flux-Deforum Bridge...")
+            print("\n🔧 Initializing Flux-Deforum Bridge...")
             bridge = FluxDeforumBridge(config)
-            
-            # Create animation configuration
-            motion_schedule = deforum_config.to_motion_schedule()
-            
-            animation_config = {
+
+            # Create motion schedule from motion config
+            motion_schedule = motion_config.to_motion_schedule()
+
+            animation_params = {
                 "prompt": args.prompt,
                 "max_frames": args.frames,
                 "width": config.width,
@@ -382,22 +380,22 @@ Examples:
                 "seed": args.seed
             }
             
-            print(f"\n🎥 Generating animation...")
+            print("\n🎥 Generating animation...")
             print(f"  Prompt: {args.prompt}")
             print(f"  Motion: zoom={args.zoom}, angle={args.angle}")
             
             # Generate animation
             start_time = time.time()
-            frames = bridge.generate_animation(animation_config)
+            frames = bridge.generate_animation(animation_params)
             generation_time = time.time() - start_time
             
             # Save frames
-            print(f"\n💾 Saving frames...")
-            saved_files = self.file_utils.save_animation_frames(
+            print("\n💾 Saving frames...")
+            self.file_utils.save_animation_frames(
                 frames, args.output, args.prefix, args.format
             )
             
-            print(f"\n ++[√]++ Animation completed!")
+            print("\n ++[√]++ Animation completed!")
             print(f"  Generated {len(frames)} frames in {generation_time:.2f}s")
             print(f"  Average time per frame: {generation_time/len(frames):.2f}s")
             print(f"  Output directory: {args.output}")
@@ -417,7 +415,7 @@ Examples:
             config_path = Path(args.output) / "config.json"
             config_data = {
                 "config": config.to_dict(),
-                "animation_config": animation_config,
+                "animation_params": animation_params,
                 "generation_stats": bridge.get_stats()
             }
             self.file_utils.save_config(config_data, config_path)
@@ -435,7 +433,7 @@ Examples:
             return 1
             
         except KeyboardInterrupt:
-            print(f"\n⚠️  Interrupted by user")
+            print("\n⚠️  Interrupted by user")
             return 130
             
         except Exception as e:

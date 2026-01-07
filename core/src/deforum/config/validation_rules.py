@@ -5,7 +5,7 @@ This module provides a single source of truth for all validation constants,
 eliminating duplication across the codebase and ensuring consistency.
 """
 
-from typing import Dict, Tuple, List
+from typing import Tuple
 
 
 class ValidationRules:

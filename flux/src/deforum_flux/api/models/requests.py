@@ -3,7 +3,7 @@ Request models for API endpoints
 Updated to fully support all parameters from page.tsx DeforumFluxConfig interface
 """
 
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, Optional, List
 from pydantic import BaseModel, Field, validator
 
 class GenerationParameters(BaseModel):

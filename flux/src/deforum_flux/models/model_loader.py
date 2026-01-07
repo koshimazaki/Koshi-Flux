@@ -6,7 +6,7 @@ Caching and production-ready inference.
 """
 
 import os
-from typing import Dict, Optional, Any, Tuple
+from typing import Dict, Optional, Any
 import torch
 
 from flux.util import load_flow_model, load_t5, load_clip, load_ae, configs, check_onnx_access_for_trt
@@ -15,7 +15,7 @@ from flux.util import load_flow_model, load_t5, load_clip, load_ae, configs, che
 try:
     from flux.trt.trt_manager import TRTManager, ModuleName
     TRT_AVAILABLE = True
-except ImportError as e:
+except ImportError:
     TRT_AVAILABLE = False
     TRTManager = None
     ModuleName = None

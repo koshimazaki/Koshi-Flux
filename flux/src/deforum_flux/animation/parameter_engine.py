@@ -6,9 +6,7 @@ consolidating the scattered parameter processing identified in the audit.
 """
 
 import re
-import numpy as np
-from typing import Dict, Any, List, Tuple, Optional, Union
-import logging
+from typing import Dict, Any, List
 
 from deforum.core.exceptions import ParameterError, ValidationError
 from deforum.core.logging_config import get_logger
@@ -595,7 +593,7 @@ class ParameterEngine:
                             # Try to parse as keyframe string
                             parsed = self.parse_keyframe_string(animation_config[param])
                             processed_config[param] = parsed
-                        except:
+                        except (ValueError, KeyError):
                             # If parsing fails, keep as string
                             processed_config[param] = animation_config[param]
                     else:

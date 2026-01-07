@@ -7,7 +7,7 @@ and parameter interpolation used by the bridge.
 
 import torch
 import numpy as np
-from typing import Dict, Any, Optional
+from typing import Dict, Optional
 from deforum.core.exceptions import ValidationError, MotionProcessingError, TensorProcessingError
 from deforum.core.logging_config import get_logger
 

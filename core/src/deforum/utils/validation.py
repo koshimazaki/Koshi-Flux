@@ -6,9 +6,7 @@ approach with centralized rules and reusable utilities from the config module.
 """
 
 import re
-import os
-from typing import Any, List, Dict, Optional, Union
-from pathlib import Path
+from typing import Any, List, Dict, Optional
 
 from deforum.core.exceptions import ValidationError
 from deforum.core.logging_config import get_logger

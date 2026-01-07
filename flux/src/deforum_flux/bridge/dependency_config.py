@@ -6,10 +6,10 @@ identified in the audit. It provides a centralized way to configure and
 manage dependencies across the bridge components.
 """
 
-from typing import Dict, Any, Optional, Type
+from typing import Dict, Any
 from functools import lru_cache
 
-from deforum.core.exceptions import DeforumConfigError, ValidationError
+from deforum.core.exceptions import DeforumConfigError
 from deforum.core.logging_config import get_logger
 
 

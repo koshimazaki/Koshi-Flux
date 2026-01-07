@@ -6,7 +6,7 @@ This module handles performance statistics tracking and resource cleanup.
 
 import torch
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from deforum.core.logging_config import get_logger
 
 

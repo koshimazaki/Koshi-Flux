@@ -12,7 +12,7 @@ from .motion_transforms import MotionTransforms
 from .motion_utils import MotionUtils
 from deforum.core.exceptions import MotionProcessingError, TensorProcessingError
 from deforum.core.logging_config import get_logger, log_performance, log_memory_usage
-from deforum.utils.device_utils import normalize_device, get_torch_device, ensure_tensor_device
+from deforum.utils.device_utils import normalize_device, get_torch_device
 
 
 class Flux16ChannelMotionEngine(nn.Module):

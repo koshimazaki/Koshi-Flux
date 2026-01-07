@@ -7,7 +7,6 @@ This module provides model management using flux.util directly.
 
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
-from pathlib import Path
 import logging
 
 # Import flux.util functions directly

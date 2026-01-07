@@ -7,10 +7,10 @@ and analysis of 16-channel Flux latents.
 
 import torch
 import numpy as np
-from typing import Dict, List, Optional, Tuple, Any
-from deforum.core.exceptions import TensorProcessingError, MotionProcessingError
+from typing import Dict, List, Any
+from deforum.core.exceptions import TensorProcessingError
 from deforum.core.logging_config import get_logger
-from deforum.utils.device_utils import normalize_device, get_torch_device, ensure_tensor_device
+from deforum.utils.device_utils import normalize_device
 
 
 class MotionUtils:

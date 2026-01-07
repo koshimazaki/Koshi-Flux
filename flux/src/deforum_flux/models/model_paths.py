@@ -6,7 +6,7 @@ Provides configurable model paths that can reference workspace models or local c
 
 import os
 from pathlib import Path
-from typing import Dict, Optional, Union
+from typing import Dict, Optional
 import json
 
 

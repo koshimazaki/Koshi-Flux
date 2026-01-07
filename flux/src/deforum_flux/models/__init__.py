@@ -14,18 +14,19 @@ from .models import (
 )
 
 __all__ = [
-    "ModelLoader", 
+    "ModelLoader",
     "model_loader",
     "ModelManager",
     "ModelInfo",
-    "ModelSet", 
+    "ModelSet",
     "get_model_manager",
     "setup_models_for_backend",
     "get_models",
     "initialize_models",
     "download_model",
     "download_onnx_model",
-    "get_available_models"
+    "get_available_models",
+    "model_manager",
 ]
 
 # Compatibility aliases for old imports

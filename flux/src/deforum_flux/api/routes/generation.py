@@ -9,7 +9,6 @@ import asyncio
 import re
 from typing import Dict, Any, Optional, Union, List
 from fastapi import APIRouter, HTTPException, BackgroundTasks
-from pydantic import BaseModel, Field
 import sys
 from pathlib import Path
 
@@ -17,10 +16,9 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from deforum_flux.bridge import FluxDeforumBridge
-from deforum.config.settings import Config
-from deforum.core.exceptions import DeforumConfigError, FluxModelError, ValidationError
+from deforum.core.exceptions import ValidationError
 from deforum.core.logging_config import get_logger
-from deforum_flux.api.models.requests import GenerationRequest, DirectGenerationRequest, AnimationConfig
+from deforum_flux.api.models.requests import GenerationRequest, DirectGenerationRequest
 from deforum_flux.api.models.responses import GenerationResponse, StatusResponse
 # Simple job manager - replace with proper implementation
 class JobManager:

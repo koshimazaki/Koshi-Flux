@@ -8,7 +8,7 @@ designed for 16-channel Flux latents in classic Deforum style.
 import torch
 import torch.nn.functional as F
 import numpy as np
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 from deforum.core.exceptions import MotionProcessingError, TensorProcessingError
 from deforum.core.logging_config import get_logger
 from deforum_flux.models.model_paths import get_model_path
@@ -401,12 +401,11 @@ class MotionTransforms:
     def _apply_depth_anything(self, image: torch.Tensor) -> torch.Tensor:
         """Apply Depth Anything estimation."""
         # Convert tensor to PIL for transformers pipeline
-        from torchvision.transforms import ToPILImage, ToTensor
+        from torchvision.transforms import ToPILImage
         import numpy as np
         
         to_pil = ToPILImage()
-        to_tensor = ToTensor()
-        
+
         batch_size = image.shape[0]
         depth_maps = []
         
@@ -517,14 +516,13 @@ class MotionTransforms:
             import torch
             torch.hub.list("intel-isl/MiDaS")
             available["midas"] = True
-        except:
+        except Exception:
             pass
-        
+
         # Check Depth Anything
         try:
-            from transformers import pipeline
             available["depth_anything"] = True
-        except:
+        except Exception:
             pass
-        
+
         return available

@@ -7,12 +7,12 @@ Now uses simplified model management with flux.util directly.
 """
 
 from fastapi import APIRouter, HTTPException
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any, Optional
 import logging
 
 # Import our centralized model constants
 from deforum_flux.api.models.constants import (
-    ModelInfo, ModelStatus, 
+    ModelStatus, 
     get_available_models, get_model_by_id, get_model_stats,
     validate_model_id, DEFAULT_MODEL_ID
 )

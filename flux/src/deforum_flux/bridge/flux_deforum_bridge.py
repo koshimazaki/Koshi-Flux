@@ -6,21 +6,17 @@ Deforum animation, focusing on geometric transformations and parameter schedulin
 """
 
 import torch
-import torch.nn.functional as F
 import numpy as np
 import time
-from typing import Optional, Dict, Any, List, Tuple, Union
-from pathlib import Path
+from typing import Optional, Dict, Any, List, Tuple
 
 from deforum.config.settings import Config
-from deforum_flux.models.model_paths import get_model_path, get_all_model_paths
+from deforum_flux.models.model_paths import get_all_model_paths
 from .bridge_config import BridgeConfigManager
 from .bridge_generation_utils import GenerationUtils
 from .bridge_stats_and_cleanup import BridgeStatsManager, ResourceManager
 from deforum.core.exceptions import (
-    FluxModelError, DeforumConfigError, MotionProcessingError,
-    ValidationError, ModelLoadingError, TensorProcessingError,
-    ResourceError, handle_exception
+    FluxModelError, ValidationError, handle_exception
 )
 from deforum.core.logging_config import get_logger, LogContext
 
@@ -462,7 +458,7 @@ class FluxDeforumBridge:
                     from flux.sampling import get_noise, prepare, get_schedule, denoise, unpack
                 except ImportError as e:
                     raise FluxModelError(
-                        f"Flux package not installed. Run: pip install git+https://github.com/black-forest-labs/flux.git",
+                        "Flux package not installed. Run: pip install git+https://github.com/black-forest-labs/flux.git",
                         model_name=self.config.model_name,
                         original_error=str(e)
                     )
@@ -488,10 +484,7 @@ class FluxDeforumBridge:
                 device_type = str(self.config.device).replace("mps", "cpu")  # MPS doesn't support autocast
                 with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
                     x = denoise(self.model, **inp, timesteps=timesteps, guidance=guidance)
-                
-                # Store latent for motion continuity (in packed format)
-                latent_tensor_packed = x.clone()
-                
+
                 # Decode to image
                 x = unpack(x.float(), height, width)
                 
@@ -730,5 +723,5 @@ class FluxDeforumBridge:
         """Destructor to ensure cleanup."""
         try:
             self.cleanup()
-        except:
+        except Exception:
             pass  # Ignore errors during cleanup

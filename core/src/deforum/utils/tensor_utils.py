@@ -8,7 +8,7 @@ commonly used in the Flux-Deforum pipeline.
 import torch
 import torch.nn.functional as F
 import numpy as np
-from typing import Tuple, Optional, Union, List
+from typing import Tuple, Optional, Union
 from PIL import Image
 
 from deforum.core.exceptions import TensorProcessingError

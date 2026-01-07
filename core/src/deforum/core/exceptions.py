@@ -231,14 +231,14 @@ class ResourceError(DeforumException):
         super().__init__(message, details)
 
 
-class TimeoutError(DeforumException):
+class DeforumTimeoutError(DeforumException):
     """Errors related to operation timeouts."""
-    
+
     def __init__(self, message: str, timeout_seconds: Optional[float] = None,
                  operation: Optional[str] = None, **kwargs):
         """
         Initialize timeout error.
-        
+
         Args:
             message: Error message
             timeout_seconds: Timeout duration in seconds
@@ -250,7 +250,7 @@ class TimeoutError(DeforumException):
             details["timeout_seconds"] = timeout_seconds
         if operation:
             details["operation"] = operation
-        
+
         super().__init__(message, details)
 
 
@@ -287,7 +287,7 @@ EXCEPTION_MAPPING = {
     "motion": MotionProcessingError,
     "tensor": TensorProcessingError,
     "resource": ResourceError,
-    "timeout": TimeoutError,
+    "timeout": DeforumTimeoutError,
     "api": APIError
 }
 

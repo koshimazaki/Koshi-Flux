@@ -8,7 +8,7 @@ import os
 import sys
 from pathlib import Path
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
@@ -192,7 +192,7 @@ async def system_status():
     """Detailed system status for monitoring and diagnostics"""
     import torch
     import psutil
-    from datetime import datetime, timedelta
+    from datetime import datetime
     
     try:
         # Process information
