@@ -86,6 +86,21 @@ from deforum_flux.core import (
     configure_logging,
 )
 
+# Audio feature extraction (optional - requires librosa)
+try:
+    from deforum_flux.audio import (
+        AudioFeatureExtractor,
+        AudioFeatures,
+        ScheduleGenerator,
+        ParseqSchedule,
+        MappingConfig,
+        FeatureMapping,
+        DEFAULT_MAPPINGS,
+    )
+    _AUDIO_AVAILABLE = True
+except ImportError:
+    _AUDIO_AVAILABLE = False
+
 __all__ = [
     # Version
     "__version__",
@@ -120,3 +135,15 @@ __all__ = [
     "get_logger",
     "configure_logging",
 ]
+
+# Add audio exports if available
+if _AUDIO_AVAILABLE:
+    __all__.extend([
+        "AudioFeatureExtractor",
+        "AudioFeatures",
+        "ScheduleGenerator",
+        "ParseqSchedule",
+        "MappingConfig",
+        "FeatureMapping",
+        "DEFAULT_MAPPINGS",
+    ])

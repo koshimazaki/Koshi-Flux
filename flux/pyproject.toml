@@ -56,6 +56,17 @@ dev = [
 video = [
     "opencv-python>=4.8.0",
 ]
+audio = [
+    "librosa>=0.10.0",
+    "audioread>=3.0.0",
+    "soundfile>=0.12.0",
+]
+all = [
+    "opencv-python>=4.8.0",
+    "librosa>=0.10.0",
+    "audioread>=3.0.0",
+    "soundfile>=0.12.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/koshimazaki/deforum-flux"
