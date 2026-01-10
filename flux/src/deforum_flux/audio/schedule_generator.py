@@ -501,7 +501,11 @@ def generate_schedule(
     Returns:
         ParseqSchedule object
     """
-    from .extractor import AudioFeatureExtractor
+    # Support both package and standalone imports
+    try:
+        from .extractor import AudioFeatureExtractor
+    except ImportError:
+        from extractor import AudioFeatureExtractor
 
     # Extract features
     extractor = AudioFeatureExtractor()
