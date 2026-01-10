@@ -41,10 +41,13 @@ class LoadAudio:
     @classmethod
     def INPUT_TYPES(cls):
         input_dir = folder_paths.get_input_directory()
-        audio_extensions = ["*.mp3", "*.wav", "*.flac", "*.ogg", "*.m4a"]
+        # Scan input directory for audio files
+        audio_extensions = (".mp3", ".wav", ".flac", ".ogg", ".m4a")
         files = []
-        for ext in audio_extensions:
-            files.extend(folder_paths.get_filename_list(ext.replace("*", "")))
+        if os.path.exists(input_dir):
+            for f in os.listdir(input_dir):
+                if f.lower().endswith(audio_extensions):
+                    files.append(f)
 
         return {
             "required": {
@@ -363,15 +366,19 @@ class ExtractAudioFeatures:
         extractor = AudioFeatureExtractor(sample_rate=sample_rate)
         features = extractor.extract_all(audio, num_frames, fps)
 
+        # Import AudioFeature enum for dict access
+        from ltx_audio_injection.models.audio_parameter_mapper import AudioFeature
+
         # Convert enum keys to strings for serialization
         feature_dict = {k.value: v for k, v in features.items()}
 
+        # Get features using enum keys
         return (
             feature_dict,
-            features.get("energy", torch.zeros(num_frames)),
-            features.get("beat", torch.zeros(num_frames)),
-            features.get("onset", torch.zeros(num_frames)),
-            features.get("bass", torch.zeros(num_frames)),
-            features.get("mid", torch.zeros(num_frames)),
-            features.get("high", torch.zeros(num_frames)),
+            features.get(AudioFeature.ENERGY, torch.zeros(num_frames)),
+            features.get(AudioFeature.BEAT, torch.zeros(num_frames)),
+            features.get(AudioFeature.ONSET, torch.zeros(num_frames)),
+            features.get(AudioFeature.BASS, torch.zeros(num_frames)),
+            features.get(AudioFeature.MID, torch.zeros(num_frames)),
+            features.get(AudioFeature.HIGH, torch.zeros(num_frames)),
         )

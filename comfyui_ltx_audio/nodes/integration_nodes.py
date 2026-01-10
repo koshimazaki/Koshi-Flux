@@ -207,12 +207,12 @@ class LTXAudioAdapterLoader:
         if not LTX_AUDIO_AVAILABLE:
             raise ImportError("ltx_audio_injection is required.")
 
-        # Create adapter
+        # Create adapter with correct parameter names
         adapter = LTXAudioAdapter(
-            audio_dim=audio_dim,
-            hidden_dim=hidden_dim,
-            num_tokens=num_tokens,
-            scale=scale,
+            audio_embed_dim=audio_dim,
+            cross_attention_dim=hidden_dim,
+            num_audio_tokens=num_tokens,
+            adapter_scale=scale,
         )
 
         # Load weights if provided
