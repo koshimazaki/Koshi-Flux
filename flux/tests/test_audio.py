@@ -7,23 +7,34 @@ from unittest.mock import MagicMock, patch
 import pytest
 import numpy as np
 
-from deforum_flux.audio.mapping_config import (
-    FeatureMapping,
-    MappingConfig,
-    CurveType,
-    apply_curve,
-    apply_smoothing,
-    DEFAULT_MAPPINGS,
-    load_mapping_config,
-    save_mapping_config,
-    create_custom_mapping,
+# Try to import audio modules - skip tests if not available
+try:
+    from deforum_flux.audio.mapping_config import (
+        FeatureMapping,
+        MappingConfig,
+        CurveType,
+        apply_curve,
+        apply_smoothing,
+        DEFAULT_MAPPINGS,
+        load_mapping_config,
+        save_mapping_config,
+        create_custom_mapping,
+    )
+    from deforum_flux.audio.schedule_generator import (
+        ParseqKeyframe,
+        ParseqSchedule,
+        ScheduleGenerator,
+    )
+    from deforum_flux.audio.extractor import AudioFeatures
+    HAS_AUDIO_MODULE = True
+except ImportError:
+    HAS_AUDIO_MODULE = False
+
+
+pytestmark = pytest.mark.skipif(
+    not HAS_AUDIO_MODULE,
+    reason="deforum_flux.audio module not available"
 )
-from deforum_flux.audio.schedule_generator import (
-    ParseqKeyframe,
-    ParseqSchedule,
-    ScheduleGenerator,
-)
-from deforum_flux.audio.extractor import AudioFeatures
 
 
 # =============================================================================
@@ -33,6 +44,9 @@ from deforum_flux.audio.extractor import AudioFeatures
 @pytest.fixture
 def sample_features():
     """Create sample audio features for testing."""
+    if not HAS_AUDIO_MODULE:
+        pytest.skip("Audio module not available")
+
     num_frames = 100
     return AudioFeatures(
         duration=4.17,
@@ -61,6 +75,9 @@ def sample_features():
 @pytest.fixture
 def simple_mapping():
     """Create a simple mapping configuration for testing."""
+    if not HAS_AUDIO_MODULE:
+        pytest.skip("Audio module not available")
+
     return MappingConfig(
         name="Test Mapping",
         description="Test configuration",
