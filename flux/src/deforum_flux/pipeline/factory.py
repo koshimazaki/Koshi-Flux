@@ -160,10 +160,14 @@ def create_pipeline(
             offload=offload,
         )
     else:
-        # FLUX.2 pipeline (not yet implemented)
-        raise PipelineError(
-            f"FLUX.2 pipeline not yet implemented. "
-            f"Waiting for flux2 API stabilization."
+        from deforum_flux.flux2.pipeline import Flux2DeforumPipeline
+
+        logger.info("  Backend: native flux2.sampling (BFL FLUX.2)")
+        pipeline = Flux2DeforumPipeline(
+            model_name=version.model_name,
+            device=device,
+            motion_engine=motion_engine,
+            offload=offload,
         )
 
     return pipeline
@@ -176,9 +180,15 @@ def create_flux1_pipeline(device: str = "cuda", offload: bool = False, schnell: 
     return create_pipeline(version, device=device, offload=offload)
 
 
+def create_flux2_pipeline(device: str = "cuda", offload: bool = False):
+    """Create FLUX.2 pipeline (convenience function)."""
+    return create_pipeline(FluxVersion.FLUX_2_DEV, device=device, offload=offload)
+
+
 __all__ = [
     "FluxVersion",
     "create_motion_engine",
     "create_pipeline",
     "create_flux1_pipeline",
+    "create_flux2_pipeline",
 ]

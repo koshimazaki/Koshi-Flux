@@ -47,6 +47,7 @@ from deforum_flux.pipeline import (
     create_pipeline,
     create_motion_engine,
     create_flux1_pipeline,
+    create_flux2_pipeline,
 )
 
 # FLUX.1 components
@@ -60,6 +61,7 @@ from deforum_flux.flux1 import (
 
 # FLUX.2 components
 from deforum_flux.flux2 import (
+    Flux2DeforumPipeline,
     Flux2MotionEngine,
     Flux2DevMotionEngine,
     FLUX2_CONFIG,
@@ -92,6 +94,7 @@ __all__ = [
     "create_pipeline",
     "create_motion_engine",
     "create_flux1_pipeline",
+    "create_flux2_pipeline",
     # FLUX.1
     "Flux1DeforumPipeline",
     "Flux1MotionEngine",
@@ -99,6 +102,7 @@ __all__ = [
     "Flux1SchnellMotionEngine",
     "FLUX1_CONFIG",
     # FLUX.2
+    "Flux2DeforumPipeline",
     "Flux2MotionEngine",
     "Flux2DevMotionEngine",
     "FLUX2_CONFIG",
