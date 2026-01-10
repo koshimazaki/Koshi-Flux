@@ -364,9 +364,12 @@ class Flux1DeforumPipeline:
         transformed_latent = self.motion_engine.apply_motion(prev_latent, motion_params)
 
         # Calculate timesteps for partial denoising (img2img style)
-        t_start = int(num_inference_steps * strength)
+        # BFL convention: strength=1.0 means full change (start from step 0)
+        #                 strength=0.0 means no change (skip all steps)
+        t_start = int(num_inference_steps * (1.0 - strength))
 
-        if t_start == 0:
+        # Edge case: skip denoising if strength is too low (near 0)
+        if t_start >= num_inference_steps:
             # No denoising, just decode transformed latent
             image = self._decode_latent(transformed_latent)
             return image, transformed_latent
@@ -382,8 +385,8 @@ class Flux1DeforumPipeline:
         # Pack the latent back for denoising
         x = self._pack_latent(transformed_latent, height, width)
 
-        # Blend with noise at starting timestep
-        # This mimics img2img: more strength = more noise = more change
+        # Blend latent with noise at starting timestep (img2img style)
+        # Formula: x_noised = latent * (1-t) + noise * t
         timesteps = get_schedule(
             num_inference_steps,
             x.shape[1],

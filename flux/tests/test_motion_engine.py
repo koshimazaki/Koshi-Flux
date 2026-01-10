@@ -6,11 +6,9 @@ Run with: pytest tests/test_motion_engine.py -v
 
 import pytest
 import torch
-from deforum_flux.motion import (
-    BaseFluxMotionEngine,
-    Flux1MotionEngine,
-    Flux2MotionEngine,
-)
+from deforum_flux.shared import BaseFluxMotionEngine
+from deforum_flux.flux1 import Flux1MotionEngine
+from deforum_flux.flux2 import Flux2MotionEngine
 from deforum_flux.core import TensorProcessingError
 
 

@@ -65,6 +65,15 @@ class ParameterType(Enum):
         NOISE: Noise injection amount
         CONTRAST: Output contrast
         CFG_SCALE: Classifier-free guidance scale
+
+    Seed Parameters (Parseq-style):
+        SEED: Base seed value
+        SEED_INCREMENT: Per-frame seed change (0 = static, 1 = increment each frame)
+        SEED_BEHAVIOR: Seed mode control (0 = fixed, 1 = increment, 2 = random)
+
+    Scene Parameters:
+        SCENE_WEIGHT: Scene coherence weight (higher = more consistent)
+        PROMPT_WEIGHT: Current prompt influence vs previous frame
     """
 
     ZOOM = "zoom"
@@ -79,6 +88,13 @@ class ParameterType(Enum):
     NOISE = "noise"
     CONTRAST = "contrast"
     CFG_SCALE = "cfg_scale"
+    # Parseq-style seed control
+    SEED = "seed"
+    SEED_INCREMENT = "seed_increment"
+    SEED_BEHAVIOR = "seed_behavior"
+    # Scene coherence
+    SCENE_WEIGHT = "scene_weight"
+    PROMPT_WEIGHT = "prompt_weight"
 
 
 class CurveType(Enum):
@@ -128,6 +144,13 @@ DEFAULT_PARAMETER_VALUES = {
     ParameterType.NOISE.value: 0.02,
     ParameterType.CONTRAST.value: 1.0,
     ParameterType.CFG_SCALE.value: 7.5,
+    # Parseq-style seed control
+    ParameterType.SEED.value: -1,  # -1 = random
+    ParameterType.SEED_INCREMENT.value: 1,  # Increment by 1 each frame
+    ParameterType.SEED_BEHAVIOR.value: 1,  # 0=fixed, 1=increment, 2=random
+    # Scene coherence
+    ParameterType.SCENE_WEIGHT.value: 1.0,
+    ParameterType.PROMPT_WEIGHT.value: 1.0,
 }
 
 
@@ -145,6 +168,13 @@ PARAMETER_RANGES = {
     ParameterType.NOISE.value: (0.0, 1.0),
     ParameterType.CONTRAST.value: (0.0, 5.0),
     ParameterType.CFG_SCALE.value: (1.0, 30.0),
+    # Parseq-style seed control
+    ParameterType.SEED.value: (-1, 2147483647),  # -1 = random, else fixed
+    ParameterType.SEED_INCREMENT.value: (0, 100),  # 0 = no change, N = add N per frame
+    ParameterType.SEED_BEHAVIOR.value: (0, 2),  # 0=fixed, 1=increment, 2=random
+    # Scene coherence
+    ParameterType.SCENE_WEIGHT.value: (0.0, 2.0),
+    ParameterType.PROMPT_WEIGHT.value: (0.0, 2.0),
 }
 
 

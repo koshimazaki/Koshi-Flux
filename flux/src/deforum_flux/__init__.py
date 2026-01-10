@@ -86,6 +86,19 @@ from deforum_flux.core import (
     configure_logging,
 )
 
+# Bridge (unified entry point)
+from deforum_flux.bridge import (
+    FluxDeforumBridge,
+    GenerationStats,
+)
+
+# API (optional - requires fastapi, uvicorn)
+try:
+    from deforum_flux.api import app as api_app
+    _API_AVAILABLE = True
+except ImportError:
+    _API_AVAILABLE = False
+
 # Audio feature extraction (optional - requires librosa)
 try:
     from deforum_flux.audio import (
@@ -134,7 +147,14 @@ __all__ = [
     "ModelLoadError",
     "get_logger",
     "configure_logging",
+    # Bridge
+    "FluxDeforumBridge",
+    "GenerationStats",
 ]
+
+# Add API exports if available
+if _API_AVAILABLE:
+    __all__.append("api_app")
 
 # Add audio exports if available
 if _AUDIO_AVAILABLE:

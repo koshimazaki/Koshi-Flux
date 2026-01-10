@@ -313,6 +313,174 @@ def _create_presets() -> Dict[str, MappingConfig]:
         global_smoothing=0.05,
     )
 
+    # =========================================================================
+    # PARSEQ STYLE - Strength drop on beats (classic music video look)
+    # =========================================================================
+    presets["parseq_drop"] = MappingConfig(
+        name="Parseq Drop",
+        description="Strength drops on beats for scene changes (Parseq-style)",
+        mappings=[
+            # DROP strength on beats (invert=True means loud=low strength)
+            FeatureMapping(
+                feature="beat_strength",
+                parameter="strength",
+                min_value=0.3,  # Low strength on beat = more change
+                max_value=0.75,  # High strength between beats = stable
+                curve=CurveType.EASE_OUT,
+                invert=True,  # KEY: Inverts so beats DROP strength
+                threshold=0.3,
+            ),
+            # Increase seed increment on beats for variation
+            FeatureMapping(
+                feature="onset_strength",
+                parameter="seed_increment",
+                min_value=0,  # No seed change normally
+                max_value=5,  # Jump seed on strong onsets
+                curve=CurveType.EASE_OUT,
+                threshold=0.5,
+            ),
+            # Subtle zoom pulse
+            FeatureMapping(
+                feature="bass",
+                parameter="zoom",
+                min_value=1.0,
+                max_value=1.08,
+                curve=CurveType.EASE_OUT,
+            ),
+        ],
+        global_smoothing=0.05,
+    )
+
+    # =========================================================================
+    # BEAT MORPH - Scene changes on every beat
+    # =========================================================================
+    presets["beat_morph"] = MappingConfig(
+        name="Beat Morph",
+        description="Morphs/changes scene on every beat with seed jumps",
+        mappings=[
+            # Sharp strength drop on beats
+            FeatureMapping(
+                feature="beat_strength",
+                parameter="strength",
+                min_value=0.2,  # Very low = big change on beat
+                max_value=0.7,
+                curve=CurveType.EXPONENTIAL,
+                invert=True,
+            ),
+            # Seed jumps on beats
+            FeatureMapping(
+                feature="beat_strength",
+                parameter="seed_increment",
+                min_value=0,
+                max_value=10,  # Big seed jump = different image
+                curve=CurveType.EASE_OUT,
+                threshold=0.4,
+            ),
+            # CFG scale increases on beats for sharper images
+            FeatureMapping(
+                feature="beat_strength",
+                parameter="cfg_scale",
+                min_value=3.5,
+                max_value=7.0,
+                curve=CurveType.EASE_OUT,
+            ),
+        ],
+        global_smoothing=0.02,  # Very snappy
+    )
+
+    # =========================================================================
+    # SMOOTH RIDE - Consistent scene with subtle audio response
+    # =========================================================================
+    presets["smooth_ride"] = MappingConfig(
+        name="Smooth Ride",
+        description="High scene consistency with gentle audio modulation",
+        mappings=[
+            # Keep strength HIGH (stable scene)
+            FeatureMapping(
+                feature="energy",
+                parameter="strength",
+                min_value=0.7,  # Never too low
+                max_value=0.85,
+                curve=CurveType.EASE_IN_OUT,
+                smoothing=0.5,
+            ),
+            # No seed changes - stay consistent
+            FeatureMapping(
+                feature="bass",
+                parameter="seed_increment",
+                min_value=0,
+                max_value=0,  # Fixed at 0
+                curve=CurveType.LINEAR,
+            ),
+            # Very subtle zoom
+            FeatureMapping(
+                feature="bass",
+                parameter="zoom",
+                min_value=1.0,
+                max_value=1.03,
+                curve=CurveType.EASE_IN_OUT,
+                smoothing=0.4,
+            ),
+            # Gentle angle sway
+            FeatureMapping(
+                feature="mid",
+                parameter="angle",
+                min_value=-2,
+                max_value=2,
+                curve=CurveType.SINE,
+                smoothing=0.5,
+            ),
+        ],
+        global_smoothing=0.4,
+    )
+
+    # =========================================================================
+    # DRUM REACTIVE - Responds to kick/snare patterns
+    # =========================================================================
+    presets["drum_reactive"] = MappingConfig(
+        name="Drum Reactive",
+        description="Strength and zoom react to drum hits",
+        mappings=[
+            # Kick drum = zoom in + strength drop
+            FeatureMapping(
+                feature="bass",
+                parameter="zoom",
+                min_value=1.0,
+                max_value=1.15,
+                curve=CurveType.EASE_OUT,
+                threshold=0.3,
+            ),
+            FeatureMapping(
+                feature="bass",
+                parameter="strength",
+                min_value=0.4,
+                max_value=0.7,
+                curve=CurveType.EASE_OUT,
+                invert=True,  # Drop on kick
+                threshold=0.3,
+            ),
+            # Snare/high = angle snap
+            FeatureMapping(
+                feature="high",
+                parameter="angle",
+                min_value=-8,
+                max_value=8,
+                curve=CurveType.EASE_OUT,
+                threshold=0.4,
+            ),
+            # Mid = translation
+            FeatureMapping(
+                feature="mid",
+                parameter="translation_x",
+                min_value=-15,
+                max_value=15,
+                curve=CurveType.LINEAR,
+                smoothing=0.2,
+            ),
+        ],
+        global_smoothing=0.08,
+    )
+
     return presets
 
 

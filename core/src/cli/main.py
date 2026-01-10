@@ -12,7 +12,7 @@ from typing import List
 
 from deforum.config.settings import Config, get_preset
 from deforum_flux.bridge import FluxDeforumBridge
-from deforum_flux.bridge.parameter_adapter import FluxDeforumParameterAdapter
+from deforum_flux.shared import FluxDeforumParameterAdapter
 from deforum.core.logging_config import setup_logging
 from deforum.core.exceptions import DeforumException
 from deforum.utils.file_utils import FileUtils
