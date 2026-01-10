@@ -16,6 +16,7 @@ from .factory import (
     create_motion_engine,
     create_pipeline,
     create_flux1_pipeline,
+    create_flux2_pipeline,
 )
 
 __all__ = [
@@ -23,4 +24,5 @@ __all__ = [
     "create_motion_engine",
     "create_pipeline",
     "create_flux1_pipeline",
+    "create_flux2_pipeline",
 ]
