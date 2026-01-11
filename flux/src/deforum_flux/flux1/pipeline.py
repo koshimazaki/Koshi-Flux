@@ -29,6 +29,7 @@ from deforum_flux.core import (
 )
 from deforum_flux.shared import FluxDeforumParameterAdapter, MotionFrame, BaseFluxMotionEngine
 from deforum_flux.utils import temp_directory, save_frames, encode_video_ffmpeg
+from deforum_flux.feedback import FeedbackProcessor, FeedbackConfig
 from .motion_engine import Flux1MotionEngine
 from .config import FLUX1_CONFIG
 
@@ -85,6 +86,9 @@ class Flux1DeforumPipeline:
 
         # Parameter adapter for Deforum schedules
         self.param_adapter = FluxDeforumParameterAdapter()
+
+        # Feedback processor for pixel-space enhancements
+        self.feedback_processor = FeedbackProcessor()
 
         # Models (lazy loaded)
         self._model = None
@@ -177,6 +181,8 @@ class Flux1DeforumPipeline:
         sharpen_amount: float = 0.0,
         noise_type: str = "gaussian",
         feedback_decay: float = 0.0,
+        feedback_mode: bool = False,
+        feedback_config: Optional[FeedbackConfig] = None,
     ) -> str:
         """
         Generate Deforum-style animation using native FLUX.
@@ -224,6 +230,16 @@ class Flux1DeforumPipeline:
                 - "perlin": Coherent Perlin noise (smoother, FeedbackSampler-style)
             feedback_decay: Latent momentum from previous frame (0.0-1.0). FeedbackSampler uses 0.9.
                 Higher = more temporal consistency but may accumulate artifacts. Default 0.0.
+            feedback_mode: Enable FeedbackSampler-style pixel-space processing. When True, all
+                enhancements (color matching, sharpening, noise) are applied in pixel space AFTER
+                VAE decode, then re-encoded before denoising. This is the core FeedbackSampler
+                innovation for temporal coherence. Default False.
+            feedback_config: Configuration for feedback processing. If None, uses defaults:
+                - color_mode: "LAB" (perceptually uniform color matching)
+                - noise_amount: 0.02 (subtle noise injection)
+                - noise_type: "perlin" (coherent noise for organic texture)
+                - sharpen_amount: 0.1 (recovers detail at low denoise)
+                - contrast_boost: 1.0 (no contrast adjustment)
 
         Returns:
             Path to output video file
@@ -279,6 +295,8 @@ class Flux1DeforumPipeline:
                 sharpen_amount=sharpen_amount,
                 noise_type=noise_type,
                 feedback_decay=feedback_decay,
+                feedback_mode=feedback_mode,
+                feedback_config=feedback_config,
             )
 
             # Create loop by appending reversed frames (excluding first and last to avoid duplicates)
@@ -650,6 +668,8 @@ class Flux1DeforumPipeline:
         sharpen_amount: float = 0.0,
         noise_type: str = "gaussian",
         feedback_decay: float = 0.0,
+        feedback_mode: bool = False,
+        feedback_config: Optional[FeedbackConfig] = None,
     ) -> List[Image.Image]:
         """
         Core generation loop using native flux.sampling.
@@ -669,6 +689,8 @@ class Flux1DeforumPipeline:
         sharpen_amount: Anti-blur sharpening 0.0-1.0 (recommended 0.1-0.25)
         noise_type: "gaussian" (default) or "perlin" (coherent, FeedbackSampler-style)
         feedback_decay: 0.0-1.0, latent momentum from previous frame (FeedbackSampler uses 0.9)
+        feedback_mode: If True, use FeedbackSampler-style pixel-space processing
+        feedback_config: Configuration for feedback processing (FeedbackConfig instance)
         """
         from flux.sampling import get_noise
 
@@ -788,19 +810,34 @@ class Flux1DeforumPipeline:
                     prev_on_device = prev_latent.to(latent.device)
                     latent = latent * (1 - feedback_decay) + prev_on_device * feedback_decay
 
-            # Apply sharpening to counteract motion blur
-            if sharpen_amount > 0:
-                image = self._sharpen_image(image, sharpen_amount)
+            # FeedbackSampler-style pixel-space processing
+            if feedback_mode and i > 0 and first_frame is not None:
+                # Use FeedbackProcessor for all pixel-space enhancements
+                # Order: color match -> contrast -> sharpen -> noise (critical!)
+                config = feedback_config or FeedbackConfig()
+                image_np = np.array(image)
+                reference_np = np.array(first_frame)
+                processed_np = self.feedback_processor.process(image_np, reference_np, config)
+                image = Image.fromarray(processed_np)
 
-            # Apply color coherence if enabled
-            if color_coherence and i > 0:
-                if color_coherence == "LAB" and first_frame is not None:
-                    # LAB color space matching (recommended - perceptually uniform)
-                    image = self._match_histogram_lab(image, first_frame)
-                elif color_coherence == "match_first" and first_frame is not None:
-                    image = self._match_histogram(image, first_frame)
-                elif color_coherence == "match_frame" and prev_image is not None:
-                    image = self._match_histogram(image, prev_image)
+                # Re-encode processed image back to latent for next frame
+                # This is the key FeedbackSampler insight: process in pixel space, then re-encode
+                latent = self._encode_to_latent(image)
+            else:
+                # Traditional processing (when feedback_mode=False)
+                # Apply sharpening to counteract motion blur
+                if sharpen_amount > 0:
+                    image = self._sharpen_image(image, sharpen_amount)
+
+                # Apply color coherence if enabled
+                if color_coherence and i > 0:
+                    if color_coherence == "LAB" and first_frame is not None:
+                        # LAB color space matching (recommended - perceptually uniform)
+                        image = self._match_histogram_lab(image, first_frame)
+                    elif color_coherence == "match_first" and first_frame is not None:
+                        image = self._match_histogram(image, first_frame)
+                    elif color_coherence == "match_frame" and prev_image is not None:
+                        image = self._match_histogram(image, prev_image)
 
             # Track frames for color coherence
             if i == 0:

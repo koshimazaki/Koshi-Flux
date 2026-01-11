@@ -114,6 +114,13 @@ try:
 except ImportError:
     _AUDIO_AVAILABLE = False
 
+# Feedback processing (FeedbackSampler-style pixel-space enhancements)
+from deforum_flux.feedback import (
+    FeedbackProcessor,
+    FeedbackConfig,
+    ColorMatcher,
+)
+
 __all__ = [
     # Version
     "__version__",
@@ -150,6 +157,10 @@ __all__ = [
     # Bridge
     "FluxDeforumBridge",
     "GenerationStats",
+    # Feedback
+    "FeedbackProcessor",
+    "FeedbackConfig",
+    "ColorMatcher",
 ]
 
 # Add API exports if available
