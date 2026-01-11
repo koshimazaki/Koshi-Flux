@@ -175,6 +175,8 @@ class Flux1DeforumPipeline:
         interpolation: Optional[int] = None,
         motion_space: str = "latent",
         sharpen_amount: float = 0.0,
+        noise_type: str = "gaussian",
+        feedback_decay: float = 0.0,
     ) -> str:
         """
         Generate Deforum-style animation using native FLUX.
@@ -217,6 +219,11 @@ class Flux1DeforumPipeline:
                 - "latent": Apply in latent space (faster, may drift)
                 - "pixel": Apply to image then re-encode (traditional Deforum, more stable)
             sharpen_amount: Anti-blur sharpening (0.0-1.0). Recommended 0.1-0.25. Default 0.0.
+            noise_type: Type of noise to use:
+                - "gaussian": Standard random noise (default)
+                - "perlin": Coherent Perlin noise (smoother, FeedbackSampler-style)
+            feedback_decay: Latent momentum from previous frame (0.0-1.0). FeedbackSampler uses 0.9.
+                Higher = more temporal consistency but may accumulate artifacts. Default 0.0.
 
         Returns:
             Path to output video file
@@ -270,6 +277,8 @@ class Flux1DeforumPipeline:
                 color_coherence=color_coherence,
                 motion_space=motion_space,
                 sharpen_amount=sharpen_amount,
+                noise_type=noise_type,
+                feedback_decay=feedback_decay,
             )
 
             # Create loop by appending reversed frames (excluding first and last to avoid duplicates)
@@ -297,6 +306,126 @@ class Flux1DeforumPipeline:
 
         self.logger.info(f"Animation saved to {output_path}")
         return str(output_path)
+
+    def _generate_perlin_noise(
+        self,
+        height: int,
+        width: int,
+        scale: float = 4.0,
+        octaves: int = 4,
+        seed: Optional[int] = None,
+        device: str = "cpu",
+    ) -> torch.Tensor:
+        """
+        Generate coherent Perlin-like noise for smoother frame-to-frame transitions.
+
+        Unlike random Gaussian noise, Perlin noise has spatial coherence which
+        produces smoother transitions between frames.
+
+        Args:
+            height: Image height (will be divided by 8 for latent)
+            width: Image width (will be divided by 8 for latent)
+            scale: Noise scale (lower = larger features). Default 4.0.
+            octaves: Number of noise octaves to combine. Default 4.
+            seed: Random seed for reproducibility
+            device: Device for output tensor
+
+        Returns:
+            Perlin noise tensor matching FLUX latent shape (1, 16, H/8, W/8)
+        """
+        if seed is not None:
+            np.random.seed(seed)
+
+        # Latent dimensions
+        h, w = height // 8, width // 8
+
+        # Generate multi-octave Perlin-like noise using gradient interpolation
+        def generate_2d_perlin(h: int, w: int, scale: float) -> np.ndarray:
+            """Generate single octave of 2D Perlin-like noise."""
+            # Grid dimensions for gradients (add padding for interpolation)
+            gh = int(np.ceil(h / scale)) + 2
+            gw = int(np.ceil(w / scale)) + 2
+
+            # Random gradient vectors at grid points
+            angles = np.random.uniform(0, 2 * np.pi, (gh, gw))
+            gradients_x = np.cos(angles)
+            gradients_y = np.sin(angles)
+
+            # Pixel coordinates
+            y_coords = np.linspace(0, (gh - 2), h)
+            x_coords = np.linspace(0, (gw - 2), w)
+
+            # Grid cell indices
+            y0 = np.floor(y_coords).astype(int)
+            x0 = np.floor(x_coords).astype(int)
+            y1 = y0 + 1
+            x1 = x0 + 1
+
+            # Local coordinates within cell (0-1)
+            dy = y_coords - y0
+            dx = x_coords - x0
+
+            # Smoothstep for interpolation (Ken Perlin's improved noise uses 6t^5 - 15t^4 + 10t^3)
+            def smoothstep(t):
+                return t * t * t * (t * (t * 6 - 15) + 10)
+
+            sy = smoothstep(dy)
+            sx = smoothstep(dx)
+
+            # Compute dot products at each corner
+            noise = np.zeros((h, w))
+            for yi in range(h):
+                for xi in range(w):
+                    # Corner gradient vectors
+                    g00 = (gradients_x[y0[yi], x0[xi]], gradients_y[y0[yi], x0[xi]])
+                    g01 = (gradients_x[y0[yi], x1[xi]], gradients_y[y0[yi], x1[xi]])
+                    g10 = (gradients_x[y1[yi], x0[xi]], gradients_y[y1[yi], x0[xi]])
+                    g11 = (gradients_x[y1[yi], x1[xi]], gradients_y[y1[yi], x1[xi]])
+
+                    # Distance vectors from corners
+                    d00 = (dx[xi], dy[yi])
+                    d01 = (dx[xi] - 1, dy[yi])
+                    d10 = (dx[xi], dy[yi] - 1)
+                    d11 = (dx[xi] - 1, dy[yi] - 1)
+
+                    # Dot products
+                    n00 = g00[0] * d00[0] + g00[1] * d00[1]
+                    n01 = g01[0] * d01[0] + g01[1] * d01[1]
+                    n10 = g10[0] * d10[0] + g10[1] * d10[1]
+                    n11 = g11[0] * d11[0] + g11[1] * d11[1]
+
+                    # Bilinear interpolation
+                    nx0 = n00 * (1 - sx[xi]) + n01 * sx[xi]
+                    nx1 = n10 * (1 - sx[xi]) + n11 * sx[xi]
+                    noise[yi, xi] = nx0 * (1 - sy[yi]) + nx1 * sy[yi]
+
+            return noise
+
+        # Generate multi-octave noise for all 16 channels
+        noise_channels = []
+        for c in range(16):
+            channel_noise = np.zeros((h, w))
+            amplitude = 1.0
+            total_amplitude = 0.0
+
+            for o in range(octaves):
+                octave_scale = scale * (2 ** o)
+                channel_noise += amplitude * generate_2d_perlin(h, w, octave_scale)
+                total_amplitude += amplitude
+                amplitude *= 0.5  # Each octave contributes less
+
+            # Normalize
+            channel_noise /= total_amplitude
+            noise_channels.append(channel_noise)
+
+        # Stack and convert to tensor
+        noise = np.stack(noise_channels, axis=0)
+        noise = torch.from_numpy(noise).unsqueeze(0).to(dtype=torch.bfloat16, device=device)
+
+        # Normalize to match Gaussian noise statistics (mean=0, std=1)
+        noise = (noise - noise.mean()) / (noise.std() + 1e-6)
+
+        return noise
 
     def _sharpen_image(self, image: Image.Image, amount: float) -> Image.Image:
         """Apply unsharp mask sharpening to counteract motion blur."""
@@ -519,6 +648,8 @@ class Flux1DeforumPipeline:
         color_coherence: Optional[str] = None,
         motion_space: str = "latent",
         sharpen_amount: float = 0.0,
+        noise_type: str = "gaussian",
+        feedback_decay: float = 0.0,
     ) -> List[Image.Image]:
         """
         Core generation loop using native flux.sampling.
@@ -536,6 +667,8 @@ class Flux1DeforumPipeline:
         color_coherence: "match_frame", "match_first", or "LAB" (recommended)
         motion_space: "latent" (fast) or "pixel" (traditional Deforum, more stable)
         sharpen_amount: Anti-blur sharpening 0.0-1.0 (recommended 0.1-0.25)
+        noise_type: "gaussian" (default) or "perlin" (coherent, FeedbackSampler-style)
+        feedback_decay: 0.0-1.0, latent momentum from previous frame (FeedbackSampler uses 0.9)
         """
         from flux.sampling import get_noise
 
@@ -594,8 +727,11 @@ class Flux1DeforumPipeline:
                 frame_noise = None
                 if noise_mode == "slerp" and current_noise is not None:
                     # Generate target noise for this frame
-                    target_noise = get_noise(1, height, width, device=noise_device,
-                                            dtype=torch.bfloat16, seed=seed + i)
+                    if noise_type == "perlin":
+                        target_noise = self._generate_perlin_noise(height, width, seed=seed + i, device=noise_device)
+                    else:
+                        target_noise = get_noise(1, height, width, device=noise_device,
+                                                dtype=torch.bfloat16, seed=seed + i)
                     # Slerp from current to target by delta amount
                     current_noise = self._slerp_noise(current_noise, target_noise, noise_delta)
                     frame_noise = current_noise
@@ -603,6 +739,9 @@ class Flux1DeforumPipeline:
                     # Parseq-style: smooth interpolation from noise_a to noise_b over all frames
                     t = i / max(len(motion_frames) - 1, 1)  # 0.0 to 1.0
                     frame_noise = self._slerp_noise(noise_a, noise_b, t)
+                elif noise_type == "perlin":
+                    # Generate coherent Perlin noise (FeedbackSampler-style)
+                    frame_noise = self._generate_perlin_noise(height, width, seed=frame_seed, device=noise_device)
 
                 # Subsequent frames: motion + partial denoise
                 # Use passed strength parameter, not motion_frame default
@@ -641,6 +780,13 @@ class Flux1DeforumPipeline:
                         custom_noise=frame_noise,
                         noise_scale=noise_scale,
                     )
+
+                # Apply feedback decay (FeedbackSampler-style latent momentum)
+                # Blends new latent with previous latent for temporal consistency
+                if feedback_decay > 0 and prev_latent is not None:
+                    # Ensure tensors are on same device
+                    prev_on_device = prev_latent.to(latent.device)
+                    latent = latent * (1 - feedback_decay) + prev_on_device * feedback_decay
 
             # Apply sharpening to counteract motion blur
             if sharpen_amount > 0:
