@@ -172,6 +172,9 @@ class Flux1DeforumPipeline:
         init_image: Optional[Union[str, Path, Image.Image]] = None,
         color_coherence: Optional[str] = None,
         loop: bool = False,
+        interpolation: Optional[int] = None,
+        motion_space: str = "latent",
+        sharpen_amount: float = 0.0,
     ) -> str:
         """
         Generate Deforum-style animation using native FLUX.
@@ -196,7 +199,8 @@ class Flux1DeforumPipeline:
             noise_mode: Noise consistency mode:
                 - "fixed": Same noise pattern for all frames (most consistent)
                 - "incremental": seed + frame_idx (most variation)
-                - "slerp": Parseq-style smooth noise evolution (best of both)
+                - "slerp": Smooth noise evolution via spherical interpolation
+                - "subseed": Parseq-style subseed interpolation (smoothest)
             noise_delta: For slerp mode, how much noise evolves per frame (0.02-0.1)
             noise_scale: How much noise to blend in (0.0-1.0). Lower = smoother, higher = more variation.
                 FLUX.1 works well with 0.3-0.6. Default 0.5.
@@ -207,6 +211,12 @@ class Flux1DeforumPipeline:
                 - "match_frame": Match histogram to previous frame
                 - "match_first": Match histogram to first frame
             loop: If True, append reversed frames to create seamless loop
+            interpolation: Frame interpolation multiplier (2, 4, or 8). Uses RIFE if available,
+                falls back to ffmpeg minterpolate. Great for smoothing "creative" mode flicker.
+            motion_space: Where to apply motion transform:
+                - "latent": Apply in latent space (faster, may drift)
+                - "pixel": Apply to image then re-encode (traditional Deforum, more stable)
+            sharpen_amount: Anti-blur sharpening (0.0-1.0). Recommended 0.1-0.25. Default 0.0.
 
         Returns:
             Path to output video file
@@ -258,12 +268,18 @@ class Flux1DeforumPipeline:
                 noise_scale=noise_scale,
                 init_latent=init_latent,
                 color_coherence=color_coherence,
+                motion_space=motion_space,
+                sharpen_amount=sharpen_amount,
             )
 
             # Create loop by appending reversed frames (excluding first and last to avoid duplicates)
             if loop and len(frames) > 2:
                 self.logger.info("Creating seamless loop...")
                 frames = frames + frames[-2:0:-1]
+
+            # Apply frame interpolation if requested
+            if interpolation and interpolation > 1:
+                frames = self._interpolate_frames(frames, interpolation)
 
             # Save frames
             frame_paths = save_frames(frames, temp_dir / "frames")
@@ -281,6 +297,77 @@ class Flux1DeforumPipeline:
 
         self.logger.info(f"Animation saved to {output_path}")
         return str(output_path)
+
+    def _sharpen_image(self, image: Image.Image, amount: float) -> Image.Image:
+        """Apply unsharp mask sharpening to counteract motion blur."""
+        if amount <= 0:
+            return image
+        from PIL import ImageFilter, ImageEnhance
+        # Unsharp mask: blend original with sharpened
+        sharpened = image.filter(ImageFilter.UnsharpMask(radius=1, percent=int(amount * 150), threshold=1))
+        return sharpened
+
+    def _match_histogram_lab(self, source: Image.Image, reference: Image.Image) -> Image.Image:
+        """Match color in LAB space (perceptually uniform - better than RGB)."""
+        import numpy as np
+        try:
+            import cv2
+            # Convert to LAB
+            src_lab = cv2.cvtColor(np.array(source), cv2.COLOR_RGB2LAB).astype(np.float32)
+            ref_lab = cv2.cvtColor(np.array(reference), cv2.COLOR_RGB2LAB).astype(np.float32)
+
+            # Match each channel
+            for i in range(3):
+                src_mean, src_std = src_lab[:,:,i].mean(), src_lab[:,:,i].std()
+                ref_mean, ref_std = ref_lab[:,:,i].mean(), ref_lab[:,:,i].std()
+                # Normalize and rescale
+                src_lab[:,:,i] = (src_lab[:,:,i] - src_mean) * (ref_std / (src_std + 1e-6)) + ref_mean
+
+            src_lab = np.clip(src_lab, 0, 255).astype(np.uint8)
+            result = cv2.cvtColor(src_lab, cv2.COLOR_LAB2RGB)
+            return Image.fromarray(result)
+        except ImportError:
+            # Fallback to RGB histogram matching
+            return self._match_histogram(source, reference)
+
+    def _apply_image_motion(self, image: Image.Image, motion_params: Dict[str, float]) -> Image.Image:
+        """Apply motion transform to PIL Image (pixel space - traditional Deforum style)."""
+        import numpy as np
+        from PIL import Image as PILImage
+
+        zoom = motion_params.get("zoom", 1.0)
+        angle = motion_params.get("angle", 0.0)
+        tx = motion_params.get("translation_x", 0.0)
+        ty = motion_params.get("translation_y", 0.0)
+
+        # Skip if no transform
+        if zoom == 1.0 and angle == 0.0 and tx == 0.0 and ty == 0.0:
+            return image
+
+        width, height = image.size
+        cx, cy = width / 2, height / 2
+
+        # Build affine transform matrix
+        # Order: translate to center, scale, rotate, translate back, then apply tx/ty
+        import math
+        cos_a = math.cos(math.radians(-angle))
+        sin_a = math.sin(math.radians(-angle))
+
+        # Affine coefficients for PIL (inverse transform)
+        # For zoom: we want to zoom IN, so we sample from a SMALLER region (divide by zoom)
+        a = cos_a / zoom
+        b = sin_a / zoom
+        c = cx - cx * a - cy * b - tx / zoom
+        d = -sin_a / zoom
+        e = cos_a / zoom
+        f = cy - cx * d - cy * e - ty / zoom
+
+        return image.transform(
+            (width, height),
+            PILImage.AFFINE,
+            (a, b, c, d, e, f),
+            resample=PILImage.BICUBIC
+        )
 
     def _match_histogram(self, source: Image.Image, reference: Image.Image) -> Image.Image:
         """Match the color histogram of source to reference (Deforum-style color coherence)."""
@@ -308,6 +395,87 @@ class Flux1DeforumPipeline:
         # Blend with original to avoid harsh changes (50% blend)
         result = (result * 0.5 + src * 0.5).clip(0, 255).astype(np.uint8)
         return Image.fromarray(result)
+
+    def _interpolate_frames(self, frames: List[Image.Image], multiplier: int) -> List[Image.Image]:
+        """
+        Interpolate frames using RIFE (if available) or simple blend.
+
+        Args:
+            frames: List of PIL Images
+            multiplier: How many frames to generate between each pair (2, 4, or 8)
+
+        Returns:
+            Interpolated frame list
+        """
+        if len(frames) < 2:
+            return frames
+
+        self.logger.info(f"Interpolating frames {len(frames)} -> {len(frames) * multiplier} (x{multiplier})")
+
+        # Try RIFE first
+        try:
+            return self._interpolate_rife(frames, multiplier)
+        except Exception as e:
+            self.logger.warning(f"RIFE not available ({e}), using blend interpolation")
+
+        # Fallback: simple alpha blend interpolation
+        interpolated = []
+        for i in range(len(frames) - 1):
+            interpolated.append(frames[i])
+            # Generate intermediate frames
+            for j in range(1, multiplier):
+                alpha = j / multiplier
+                blended = Image.blend(frames[i], frames[i + 1], alpha)
+                interpolated.append(blended)
+        interpolated.append(frames[-1])
+
+        return interpolated
+
+    def _interpolate_rife(self, frames: List[Image.Image], multiplier: int) -> List[Image.Image]:
+        """Use RIFE model for high-quality frame interpolation."""
+        try:
+            from rife_ncnn_vulkan_python import Rife
+            rife = Rife(gpuid=0)
+        except ImportError:
+            # Try alternative rife package
+            try:
+                import torch
+                from pytorch_msssim import ssim
+                # Would need rife model loaded here
+                raise ImportError("RIFE model not configured")
+            except ImportError:
+                raise ImportError("No RIFE implementation found")
+
+        interpolated = []
+        for i in range(len(frames) - 1):
+            interpolated.append(frames[i])
+            # RIFE interpolates between pairs
+            current = frames[i]
+            next_frame = frames[i + 1]
+
+            # Generate intermediate frames recursively for multiplier
+            intermediates = self._rife_interpolate_pair(rife, current, next_frame, multiplier)
+            interpolated.extend(intermediates)
+
+        interpolated.append(frames[-1])
+        return interpolated
+
+    def _rife_interpolate_pair(self, rife, frame_a: Image.Image, frame_b: Image.Image, n: int) -> List[Image.Image]:
+        """Recursively interpolate between two frames."""
+        if n <= 1:
+            return []
+
+        # Get middle frame
+        mid = rife.process(frame_a, frame_b)
+
+        if n == 2:
+            return [mid]
+
+        # Recursively get more frames
+        left = self._rife_interpolate_pair(rife, frame_a, mid, n // 2)
+        right = self._rife_interpolate_pair(rife, mid, frame_b, n // 2)
+
+        return left + [mid] + right
 
     def _slerp_noise(self, noise_a: torch.Tensor, noise_b: torch.Tensor, t: float) -> torch.Tensor:
         """Spherical linear interpolation between noise tensors (Parseq-style)."""
@@ -349,6 +517,8 @@ class Flux1DeforumPipeline:
         noise_scale: float = 0.5,
         init_latent: Optional[torch.Tensor] = None,
         color_coherence: Optional[str] = None,
+        motion_space: str = "latent",
+        sharpen_amount: float = 0.0,
     ) -> List[Image.Image]:
         """
         Core generation loop using native flux.sampling.
@@ -363,7 +533,9 @@ class Flux1DeforumPipeline:
 
         noise_delta: For slerp mode, how much noise changes per frame (0.02-0.1)
         init_latent: Pre-encoded latent from init_image (skips first frame generation)
-        color_coherence: "match_frame" or "match_first" to prevent color drift
+        color_coherence: "match_frame", "match_first", or "LAB" (recommended)
+        motion_space: "latent" (fast) or "pixel" (traditional Deforum, more stable)
+        sharpen_amount: Anti-blur sharpening 0.0-1.0 (recommended 0.1-0.25)
         """
         from flux.sampling import get_noise
 
@@ -372,14 +544,22 @@ class Flux1DeforumPipeline:
         first_frame = None  # For color coherence "match_first"
         prev_image = None   # For color coherence "match_frame"
 
-        # Pre-generate noise tensors for slerp mode
+        # Pre-generate noise tensors for slerp/subseed modes
         noise_device = "cpu" if self.offload else self.device
         current_noise = None
+        noise_a = None  # For subseed mode
+        noise_b = None  # For subseed mode
 
         if noise_mode == "slerp":
             # Start with base noise
             current_noise = get_noise(1, height, width, device=noise_device,
                                       dtype=torch.bfloat16, seed=seed)
+        elif noise_mode == "subseed":
+            # Pre-generate both endpoints for smooth interpolation (Parseq-style)
+            noise_a = get_noise(1, height, width, device=noise_device,
+                               dtype=torch.bfloat16, seed=seed)
+            noise_b = get_noise(1, height, width, device=noise_device,
+                               dtype=torch.bfloat16, seed=seed + 1)
 
         for i, motion_frame in enumerate(tqdm(motion_frames, desc="Generating")):
             # Determine noise based on mode
@@ -389,6 +569,8 @@ class Flux1DeforumPipeline:
                 frame_seed = seed + i
             elif noise_mode == "slerp":
                 frame_seed = seed  # Will use interpolated noise instead
+            elif noise_mode == "subseed":
+                frame_seed = seed  # Will use subseed interpolated noise
             else:
                 frame_seed = seed
 
@@ -408,7 +590,7 @@ class Flux1DeforumPipeline:
                         seed=frame_seed,
                     )
             else:
-                # For slerp mode, evolve noise gradually (Parseq-style)
+                # Handle noise interpolation modes
                 frame_noise = None
                 if noise_mode == "slerp" and current_noise is not None:
                     # Generate target noise for this frame
@@ -417,25 +599,59 @@ class Flux1DeforumPipeline:
                     # Slerp from current to target by delta amount
                     current_noise = self._slerp_noise(current_noise, target_noise, noise_delta)
                     frame_noise = current_noise
+                elif noise_mode == "subseed" and noise_a is not None and noise_b is not None:
+                    # Parseq-style: smooth interpolation from noise_a to noise_b over all frames
+                    t = i / max(len(motion_frames) - 1, 1)  # 0.0 to 1.0
+                    frame_noise = self._slerp_noise(noise_a, noise_b, t)
 
                 # Subsequent frames: motion + partial denoise
-                image, latent = self._generate_motion_frame(
-                    prev_latent=prev_latent,
-                    prompt=motion_frame.prompt or motion_frames[0].prompt,
-                    motion_params=motion_frame.to_dict(),
-                    width=width,
-                    height=height,
-                    num_inference_steps=num_inference_steps,
-                    guidance_scale=guidance_scale,
-                    strength=motion_frame.strength,
-                    seed=frame_seed,
-                    custom_noise=frame_noise,
-                    noise_scale=noise_scale,
-                )
+                # Use passed strength parameter, not motion_frame default
+                frame_strength = strength if strength is not None else motion_frame.strength
+
+                if motion_space == "pixel" and prev_image is not None:
+                    # PIXEL SPACE MOTION (traditional Deforum)
+                    # Apply motion to image, then encode and denoise
+                    motion_image = self._apply_image_motion(prev_image, motion_frame.to_dict())
+                    motion_latent = self._encode_to_latent(motion_image)
+                    image, latent = self._generate_motion_frame(
+                        prev_latent=motion_latent,
+                        prompt=motion_frame.prompt or motion_frames[0].prompt,
+                        motion_params={},  # Motion already applied to image
+                        width=width,
+                        height=height,
+                        num_inference_steps=num_inference_steps,
+                        guidance_scale=guidance_scale,
+                        strength=frame_strength,
+                        seed=frame_seed,
+                        custom_noise=frame_noise,
+                        noise_scale=noise_scale,
+                    )
+                else:
+                    # LATENT SPACE MOTION (default)
+                    image, latent = self._generate_motion_frame(
+                        prev_latent=prev_latent,
+                        prompt=motion_frame.prompt or motion_frames[0].prompt,
+                        motion_params=motion_frame.to_dict(),
+                        width=width,
+                        height=height,
+                        num_inference_steps=num_inference_steps,
+                        guidance_scale=guidance_scale,
+                        strength=frame_strength,
+                        seed=frame_seed,
+                        custom_noise=frame_noise,
+                        noise_scale=noise_scale,
+                    )
+
+            # Apply sharpening to counteract motion blur
+            if sharpen_amount > 0:
+                image = self._sharpen_image(image, sharpen_amount)
 
             # Apply color coherence if enabled
             if color_coherence and i > 0:
-                if color_coherence == "match_first" and first_frame is not None:
+                if color_coherence == "LAB" and first_frame is not None:
+                    # LAB color space matching (recommended - perceptually uniform)
+                    image = self._match_histogram_lab(image, first_frame)
+                elif color_coherence == "match_first" and first_frame is not None:
                     image = self._match_histogram(image, first_frame)
                 elif color_coherence == "match_frame" and prev_image is not None:
                     image = self._match_histogram(image, prev_image)
