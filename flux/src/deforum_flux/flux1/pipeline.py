@@ -167,6 +167,11 @@ class Flux1DeforumPipeline:
         seed: Optional[int] = None,
         callback: Optional[Callable[[int, int, torch.Tensor], None]] = None,
         noise_mode: str = "fixed",
+        noise_delta: float = 0.05,
+        noise_scale: float = 0.5,
+        init_image: Optional[Union[str, Path, Image.Image]] = None,
+        color_coherence: Optional[str] = None,
+        loop: bool = False,
     ) -> str:
         """
         Generate Deforum-style animation using native FLUX.
@@ -189,9 +194,19 @@ class Flux1DeforumPipeline:
             seed: Random seed for reproducibility
             callback: Optional progress callback(frame_idx, total, latent)
             noise_mode: Noise consistency mode:
-                - "fixed": Same noise pattern for all frames (smoothest)
-                - "incremental": seed + frame_idx (more variation)
-                - "interpolated": Interpolate noise between keyframes
+                - "fixed": Same noise pattern for all frames (most consistent)
+                - "incremental": seed + frame_idx (most variation)
+                - "slerp": Parseq-style smooth noise evolution (best of both)
+            noise_delta: For slerp mode, how much noise evolves per frame (0.02-0.1)
+            noise_scale: How much noise to blend in (0.0-1.0). Lower = smoother, higher = more variation.
+                FLUX.1 works well with 0.3-0.6. Default 0.5.
+            init_image: Optional starting image (path or PIL Image). If provided, skips first frame
+                generation and starts animation from this image.
+            color_coherence: Color matching mode to prevent color drift:
+                - None: No color matching (default)
+                - "match_frame": Match histogram to previous frame
+                - "match_first": Match histogram to first frame
+            loop: If True, append reversed frames to create seamless loop
 
         Returns:
             Path to output video file
@@ -212,6 +227,21 @@ class Flux1DeforumPipeline:
 
         self.logger.info(f"Generating {num_frames} frames at {width}x{height}, seed={seed}, noise_mode={noise_mode}")
 
+        # Handle init image if provided
+        init_latent = None
+        if init_image is not None:
+            # Load image if path
+            if isinstance(init_image, (str, Path)):
+                init_image = Image.open(init_image).convert("RGB")
+
+            # Resize to match output dimensions
+            if init_image.size != (width, height):
+                init_image = init_image.resize((width, height), Image.LANCZOS)
+
+            # Encode to latent
+            self.logger.info("Encoding init image to latent space...")
+            init_latent = self._encode_to_latent(init_image)
+
         # Generate frames
         with temp_directory(prefix="flux_deforum_") as temp_dir:
             frames = self._generate_frames(
@@ -224,7 +254,16 @@ class Flux1DeforumPipeline:
                 seed=seed,
                 callback=callback,
                 noise_mode=noise_mode,
+                noise_delta=noise_delta,
+                noise_scale=noise_scale,
+                init_latent=init_latent,
+                color_coherence=color_coherence,
             )
+
+            # Create loop by appending reversed frames (excluding first and last to avoid duplicates)
+            if loop and len(frames) > 2:
+                self.logger.info("Creating seamless loop...")
+                frames = frames + frames[-2:0:-1]
 
             # Save frames
             frame_paths = save_frames(frames, temp_dir / "frames")
@@ -243,6 +282,57 @@ class Flux1DeforumPipeline:
         self.logger.info(f"Animation saved to {output_path}")
         return str(output_path)
 
+    def _match_histogram(self, source: Image.Image, reference: Image.Image) -> Image.Image:
+        """Match the color histogram of source to reference (Deforum-style color coherence)."""
+        import numpy as np
+
+        src = np.array(source).astype(np.float32)
+        ref = np.array(reference).astype(np.float32)
+
+        # Match each channel independently
+        result = np.zeros_like(src)
+        for c in range(3):
+            src_chan = src[:, :, c].flatten()
+            ref_chan = ref[:, :, c].flatten()
+
+            # Get sorted indices
+            src_sorted_idx = np.argsort(src_chan)
+            ref_sorted = np.sort(ref_chan)
+
+            # Map source values to reference distribution
+            result_chan = np.zeros_like(src_chan)
+            result_chan[src_sorted_idx] = ref_sorted
+
+            result[:, :, c] = result_chan.reshape(src.shape[:2])
+
+        # Blend with original to avoid harsh changes (50% blend)
+        result = (result * 0.5 + src * 0.5).clip(0, 255).astype(np.uint8)
+        return Image.fromarray(result)
+
+    def _slerp_noise(self, noise_a: torch.Tensor, noise_b: torch.Tensor, t: float) -> torch.Tensor:
+        """Spherical linear interpolation between noise tensors (Parseq-style)."""
+        # Flatten for dot product
+        flat_a = noise_a.flatten()
+        flat_b = noise_b.flatten()
+
+        # Normalize
+        norm_a = flat_a / flat_a.norm()
+        norm_b = flat_b / flat_b.norm()
+
+        # Compute angle
+        dot = torch.clamp((norm_a * norm_b).sum(), -1.0, 1.0)
+        omega = torch.acos(dot)
+
+        # If angle is small, use linear interpolation
+        if omega.abs() < 1e-4:
+            result = (1 - t) * noise_a + t * noise_b
+        else:
+            sin_omega = torch.sin(omega)
+            result = (torch.sin((1 - t) * omega) / sin_omega) * noise_a + \
+                     (torch.sin(t * omega) / sin_omega) * noise_b
+
+        return result
+
     @log_memory_usage
     def _generate_frames(
         self,
@@ -255,42 +345,79 @@ class Flux1DeforumPipeline:
         seed: int,
         callback: Optional[Callable],
         noise_mode: str = "fixed",
+        noise_delta: float = 0.05,
+        noise_scale: float = 0.5,
+        init_latent: Optional[torch.Tensor] = None,
+        color_coherence: Optional[str] = None,
     ) -> List[Image.Image]:
         """
         Core generation loop using native flux.sampling.
 
-        Frame 0: Full text-to-image generation
+        Frame 0: Full text-to-image generation (or use init_latent if provided)
         Frames 1-N: Motion transform -> Partial denoise -> Decode
 
         noise_mode controls frame-to-frame consistency:
-        - "fixed": Same seed for all frames (smoothest transitions)
-        - "incremental": seed + frame_idx (more variation per frame)
-        - "interpolated": Blend noise between keyframes
+        - "fixed": Same seed for all frames (most consistent)
+        - "incremental": seed + frame_idx (most variation)
+        - "slerp": Parseq-style spherical interpolation (smooth evolution)
+
+        noise_delta: For slerp mode, how much noise changes per frame (0.02-0.1)
+        init_latent: Pre-encoded latent from init_image (skips first frame generation)
+        color_coherence: "match_frame" or "match_first" to prevent color drift
         """
+        from flux.sampling import get_noise
+
         frames = []
         prev_latent = None  # 16-channel unpacked latent for motion
-        base_noise = None  # Cached noise for "fixed" mode
+        first_frame = None  # For color coherence "match_first"
+        prev_image = None   # For color coherence "match_frame"
+
+        # Pre-generate noise tensors for slerp mode
+        noise_device = "cpu" if self.offload else self.device
+        current_noise = None
+
+        if noise_mode == "slerp":
+            # Start with base noise
+            current_noise = get_noise(1, height, width, device=noise_device,
+                                      dtype=torch.bfloat16, seed=seed)
 
         for i, motion_frame in enumerate(tqdm(motion_frames, desc="Generating")):
-            # Determine frame seed based on noise_mode
+            # Determine noise based on mode
             if noise_mode == "fixed":
-                frame_seed = seed  # Same seed = same noise pattern
+                frame_seed = seed
             elif noise_mode == "incremental":
-                frame_seed = seed + i  # Different seed per frame
-            else:  # interpolated or other
-                frame_seed = seed  # Will handle interpolation separately
+                frame_seed = seed + i
+            elif noise_mode == "slerp":
+                frame_seed = seed  # Will use interpolated noise instead
+            else:
+                frame_seed = seed
 
             if i == 0:
-                # First frame: full generation
-                image, latent = self._generate_first_frame(
-                    prompt=motion_frame.prompt or "a beautiful scene",
-                    width=width,
-                    height=height,
-                    num_inference_steps=num_inference_steps,
-                    guidance_scale=guidance_scale,
-                    seed=frame_seed,
-                )
+                # First frame: use init_latent if provided, else generate
+                if init_latent is not None:
+                    self.logger.info("Using init image for first frame")
+                    latent = init_latent
+                    image = self._decode_latent(latent)
+                else:
+                    image, latent = self._generate_first_frame(
+                        prompt=motion_frame.prompt or "a beautiful scene",
+                        width=width,
+                        height=height,
+                        num_inference_steps=num_inference_steps,
+                        guidance_scale=guidance_scale,
+                        seed=frame_seed,
+                    )
             else:
+                # For slerp mode, evolve noise gradually (Parseq-style)
+                frame_noise = None
+                if noise_mode == "slerp" and current_noise is not None:
+                    # Generate target noise for this frame
+                    target_noise = get_noise(1, height, width, device=noise_device,
+                                            dtype=torch.bfloat16, seed=seed + i)
+                    # Slerp from current to target by delta amount
+                    current_noise = self._slerp_noise(current_noise, target_noise, noise_delta)
+                    frame_noise = current_noise
+
                 # Subsequent frames: motion + partial denoise
                 image, latent = self._generate_motion_frame(
                     prev_latent=prev_latent,
@@ -302,7 +429,21 @@ class Flux1DeforumPipeline:
                     guidance_scale=guidance_scale,
                     strength=motion_frame.strength,
                     seed=frame_seed,
+                    custom_noise=frame_noise,
+                    noise_scale=noise_scale,
                 )
+
+            # Apply color coherence if enabled
+            if color_coherence and i > 0:
+                if color_coherence == "match_first" and first_frame is not None:
+                    image = self._match_histogram(image, first_frame)
+                elif color_coherence == "match_frame" and prev_image is not None:
+                    image = self._match_histogram(image, prev_image)
+
+            # Track frames for color coherence
+            if i == 0:
+                first_frame = image
+            prev_image = image
 
             frames.append(image)
             prev_latent = latent
@@ -384,8 +525,15 @@ class Flux1DeforumPipeline:
         guidance_scale: float,
         strength: float,
         seed: int,
+        custom_noise: Optional[torch.Tensor] = None,
+        noise_scale: float = 0.5,
     ) -> tuple:
-        """Generate frame with motion applied to previous latent."""
+        """Generate frame with motion applied to previous latent.
+
+        Args:
+            custom_noise: Optional pre-computed noise tensor (for slerp mode)
+            noise_scale: How much noise to blend (0.0-1.0). FLUX.1 default: 0.5
+        """
         from flux.sampling import get_noise, get_schedule, prepare, denoise, unpack
 
         # Apply motion transform in 16-channel latent space
@@ -402,14 +550,17 @@ class Flux1DeforumPipeline:
             image = self._decode_latent(transformed_latent)
             return image, transformed_latent
 
-        # Get noise for blending (on CPU if offloading) - returns UNPACKED (1, 16, H/8, W/8)
+        # Use custom noise if provided (slerp mode), otherwise generate new
         noise_device = "cpu" if self.offload else self.device
-        noise = get_noise(
-            1, height, width,
-            device=noise_device,
-            dtype=torch.bfloat16,
-            seed=seed
-        )
+        if custom_noise is not None:
+            noise = custom_noise.to(noise_device)
+        else:
+            noise = get_noise(
+                1, height, width,
+                device=noise_device,
+                dtype=torch.bfloat16,
+                seed=seed
+            )
 
         # Calculate timesteps (need seq_len for schedule)
         h, w = height // 8, width // 8
@@ -423,8 +574,15 @@ class Flux1DeforumPipeline:
         # Get the noise level at t_start
         t = timesteps[t_start] if t_start < len(timesteps) else timesteps[-1]
 
-        # Blend in UNPACKED space - both are (1, 16, H/8, W/8)
-        x = transformed_latent.to(noise_device) * (1 - t) + noise * t
+        # Handle noise blending based on noise_scale
+        if noise_scale <= 0:
+            # Zero noise - pure motion transform, no noise added
+            x = transformed_latent.to(noise_device)
+        else:
+            # Scale noise blend to reduce flicker while keeping quality
+            t_scaled = t * noise_scale  # Configurable noise amount for FLUX.1
+            # Blend in UNPACKED space - both are (1, 16, H/8, W/8)
+            x = transformed_latent.to(noise_device) * (1 - t_scaled) + noise * t_scaled
 
         # Prepare with text conditioning - prepare() packs internally
         inp = prepare(self.t5, self.clip, x, prompt=prompt)
