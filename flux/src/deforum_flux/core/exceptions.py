@@ -15,7 +15,7 @@ from deforum.core.exceptions import (
     FluxModelError,
     ValidationError,
     ResourceError,
-    TimeoutError as DeforumTimeoutError,  # Alias for compatibility
+    DeforumTimeoutError,
     APIError,
 )
 

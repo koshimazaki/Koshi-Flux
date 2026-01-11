@@ -62,6 +62,9 @@ from .audio import (
     TimeSeries,
     AudioAnalyzer,
     AudioFeatures,
+    StemSeparator,
+    StemFeatures,
+    separate_stems,
 )
 
 from .renderer import (
@@ -123,6 +126,9 @@ __all__ = [
     "TimeSeries",
     "AudioAnalyzer",
     "AudioFeatures",
+    "StemSeparator",
+    "StemFeatures",
+    "separate_stems",
     # Renderer
     "RenderContext",
     "ScheduleRenderer",

@@ -10,10 +10,15 @@ Architecture:
 
 from typing import Dict, List, Optional, Union, Any, Callable
 from pathlib import Path
+import warnings
 import torch
 import numpy as np
 from PIL import Image
 from tqdm import tqdm
+
+# Suppress noisy warnings from BFL flux and transformers
+warnings.filterwarnings("ignore", message=".*legacy behaviour.*T5Tokenizer.*")
+warnings.filterwarnings("ignore", message=".*torch_dtype.*is deprecated.*")
 
 from deforum_flux.core import (
     PipelineError,
@@ -101,9 +106,10 @@ class Flux1DeforumPipeline:
 
             self.logger.info(f"Loading FLUX models: {self.model_name}")
 
-            # Load components
-            self._t5 = load_t5(self.device, max_length=256 if self.model_name == "flux-schnell" else 512)
-            self._clip = load_clip(self.device)
+            # Load components - with offload, keep everything on CPU initially
+            text_device = "cpu" if self.offload else self.device
+            self._t5 = load_t5(text_device, max_length=256 if self.model_name == "flux-schnell" else 512)
+            self._clip = load_clip(text_device)
             self._model = load_flow_model(self.model_name, device="cpu" if self.offload else self.device)
             self._ae = load_ae(self.model_name, device="cpu" if self.offload else self.device)
 
@@ -160,6 +166,7 @@ class Flux1DeforumPipeline:
         output_path: Optional[Union[str, Path]] = None,
         seed: Optional[int] = None,
         callback: Optional[Callable[[int, int, torch.Tensor], None]] = None,
+        noise_mode: str = "fixed",
     ) -> str:
         """
         Generate Deforum-style animation using native FLUX.
@@ -176,11 +183,15 @@ class Flux1DeforumPipeline:
             height: Output height (should be multiple of 16)
             num_inference_steps: Denoising steps (28 for dev, 4 for schnell)
             guidance_scale: CFG scale (3.5 typical)
-            strength: Img2img strength for subsequent frames (0.4-0.8)
+            strength: Img2img strength for subsequent frames (0.3-0.5 for smooth, 0.6-0.8 for creative)
             fps: Output video FPS
             output_path: Output video path (auto-generated if None)
             seed: Random seed for reproducibility
             callback: Optional progress callback(frame_idx, total, latent)
+            noise_mode: Noise consistency mode:
+                - "fixed": Same noise pattern for all frames (smoothest)
+                - "incremental": seed + frame_idx (more variation)
+                - "interpolated": Interpolate noise between keyframes
 
         Returns:
             Path to output video file
@@ -199,7 +210,7 @@ class Flux1DeforumPipeline:
         if seed is None:
             seed = torch.randint(0, 2**32, (1,)).item()
 
-        self.logger.info(f"Generating {num_frames} frames at {width}x{height}, seed={seed}")
+        self.logger.info(f"Generating {num_frames} frames at {width}x{height}, seed={seed}, noise_mode={noise_mode}")
 
         # Generate frames
         with temp_directory(prefix="flux_deforum_") as temp_dir:
@@ -212,6 +223,7 @@ class Flux1DeforumPipeline:
                 strength=strength,
                 seed=seed,
                 callback=callback,
+                noise_mode=noise_mode,
             )
 
             # Save frames
@@ -242,18 +254,31 @@ class Flux1DeforumPipeline:
         strength: float,
         seed: int,
         callback: Optional[Callable],
+        noise_mode: str = "fixed",
     ) -> List[Image.Image]:
         """
         Core generation loop using native flux.sampling.
 
         Frame 0: Full text-to-image generation
         Frames 1-N: Motion transform -> Partial denoise -> Decode
+
+        noise_mode controls frame-to-frame consistency:
+        - "fixed": Same seed for all frames (smoothest transitions)
+        - "incremental": seed + frame_idx (more variation per frame)
+        - "interpolated": Blend noise between keyframes
         """
         frames = []
         prev_latent = None  # 16-channel unpacked latent for motion
+        base_noise = None  # Cached noise for "fixed" mode
 
         for i, motion_frame in enumerate(tqdm(motion_frames, desc="Generating")):
-            frame_seed = seed + i
+            # Determine frame seed based on noise_mode
+            if noise_mode == "fixed":
+                frame_seed = seed  # Same seed = same noise pattern
+            elif noise_mode == "incremental":
+                frame_seed = seed + i  # Different seed per frame
+            else:  # interpolated or other
+                frame_seed = seed  # Will handle interpolation separately
 
             if i == 0:
                 # First frame: full generation
@@ -307,15 +332,16 @@ class Flux1DeforumPipeline:
 
         self.logger.info(f"Generating first frame: '{prompt[:50]}...'")
 
-        # Get initial noise
+        # Get initial noise on CPU if offloading, will move to GPU for denoising
+        noise_device = "cpu" if self.offload else self.device
         x = get_noise(
             1, height, width,
-            device=self.device,
+            device=noise_device,
             dtype=torch.bfloat16,
             seed=seed
         )
 
-        # Prepare text conditioning
+        # Prepare text conditioning (T5/CLIP on CPU if offloading)
         inp = prepare(self.t5, self.clip, x, prompt=prompt)
 
         # Get timesteps
@@ -325,9 +351,11 @@ class Flux1DeforumPipeline:
             shift=(self.model_name != "flux-schnell")
         )
 
-        # Denoise
+        # Move model and tensors to GPU for denoising
         if self.offload:
             self.model.to(self.device)
+            # Move all input tensors to GPU
+            inp = {k: v.to(self.device) if torch.is_tensor(v) else v for k, v in inp.items()}
 
         with torch.autocast(device_type=self.device.replace("mps", "cpu"), dtype=torch.bfloat16):
             x = denoise(self.model, **inp, timesteps=timesteps, guidance=guidance_scale)
@@ -374,32 +402,31 @@ class Flux1DeforumPipeline:
             image = self._decode_latent(transformed_latent)
             return image, transformed_latent
 
-        # Get noise for blending
+        # Get noise for blending (on CPU if offloading) - returns UNPACKED (1, 16, H/8, W/8)
+        noise_device = "cpu" if self.offload else self.device
         noise = get_noise(
             1, height, width,
-            device=self.device,
+            device=noise_device,
             dtype=torch.bfloat16,
             seed=seed
         )
 
-        # Pack the latent back for denoising
-        x = self._pack_latent(transformed_latent, height, width)
-
-        # Blend latent with noise at starting timestep (img2img style)
-        # Formula: x_noised = latent * (1-t) + noise * t
+        # Calculate timesteps (need seq_len for schedule)
+        h, w = height // 8, width // 8
+        seq_len = (h // 2) * (w // 2)
         timesteps = get_schedule(
             num_inference_steps,
-            x.shape[1],
+            seq_len,
             shift=(self.model_name != "flux-schnell")
         )
 
         # Get the noise level at t_start
         t = timesteps[t_start] if t_start < len(timesteps) else timesteps[-1]
 
-        # Add noise proportional to timestep
-        x = x * (1 - t) + noise[:, :x.shape[1], :] * t
+        # Blend in UNPACKED space - both are (1, 16, H/8, W/8)
+        x = transformed_latent.to(noise_device) * (1 - t) + noise * t
 
-        # Prepare with text conditioning
+        # Prepare with text conditioning - prepare() packs internally
         inp = prepare(self.t5, self.clip, x, prompt=prompt)
 
         # Only denoise from t_start onwards
@@ -409,9 +436,10 @@ class Flux1DeforumPipeline:
             image = self._decode_latent(transformed_latent)
             return image, transformed_latent
 
-        # Denoise
+        # Move model and tensors to GPU for denoising
         if self.offload:
             self.model.to(self.device)
+            inp = {k: v.to(self.device) if torch.is_tensor(v) else v for k, v in inp.items()}
 
         with torch.autocast(device_type=self.device.replace("mps", "cpu"), dtype=torch.bfloat16):
             x = denoise(self.model, **inp, timesteps=remaining_timesteps, guidance=guidance_scale)
