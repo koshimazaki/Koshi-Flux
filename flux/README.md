@@ -321,6 +321,191 @@ pipe = create_pipeline(FluxVersion.FLUX_1_DEV)
 pipe = create_pipeline(FluxVersion.FLUX_2_DEV)
 ```
 
+## FeedbackSampler Mode (January 2026)
+
+The pipeline now includes **FeedbackSampler-style processing** for improved temporal coherence. This mode applies pixel-space enhancements in the correct order to prevent burning and color drift.
+
+### Enable FeedbackSampler Mode
+
+```python
+from deforum_flux import Flux1DeforumPipeline, FeedbackConfig
+
+pipe = Flux1DeforumPipeline(model_name="flux-schnell", offload=True)
+
+video = pipe.generate_animation(
+    prompts={0: "infinite fractal tunnel, cosmic energy"},
+    motion_params={"zoom": "0:(1.0), 48:(1.05)"},
+    num_frames=48,
+    width=512,
+    height=512,
+    num_inference_steps=4,
+    guidance_scale=1.0,
+    strength=0.1,  # Low strength for FLUX
+    fps=12,
+    seed=42,
+    feedback_mode=True,  # Enable FeedbackSampler processing
+    feedback_config=FeedbackConfig(
+        noise_amount=0.015,
+        sharpen_amount=0.15,
+    ),
+    output_path="./output.mp4"
+)
+```
+
+### FeedbackConfig Parameters
+
+| Parameter | Default | Range | Description |
+|-----------|---------|-------|-------------|
+| `color_mode` | "LAB" | LAB/RGB/HSV/None | Color matching mode (LAB recommended) |
+| `noise_amount` | 0.02 | 0.005-0.03 | Pixel noise for texture variation |
+| `noise_type` | "perlin" | perlin/gaussian | Perlin = coherent, gaussian = random |
+| `sharpen_amount` | 0.1 | 0.05-0.25 | Unsharp mask to recover detail |
+| `contrast_boost` | 1.0 | 0.9-1.1 | Contrast adjustment |
+
+### Processing Order (Critical)
+
+FeedbackSampler mode processes in this order:
+
+```
+Previous Latent
+      │
+      ▼
+┌─────────────────┐
+│ Apply Motion    │ ← Zoom/rotate in latent space
+└─────────────────┘
+      │
+      ▼
+┌─────────────────┐
+│ Decode to Pixel │ ← VAE decode
+└─────────────────┘
+      │
+      ▼
+┌─────────────────┐
+│ Color Match     │ ← LAB histogram to first frame
+└─────────────────┘
+      │
+      ▼
+┌─────────────────┐
+│ Contrast        │ ← Subtle adjustment
+└─────────────────┘
+      │
+      ▼
+┌─────────────────┐
+│ Sharpen         │ ← Recover detail
+└─────────────────┘
+      │
+      ▼
+┌─────────────────┐
+│ Add Noise       │ ← AFTER color match (critical!)
+└─────────────────┘
+      │
+      ▼
+┌─────────────────┐
+│ Encode to Latent│ ← VAE encode
+└─────────────────┘
+      │
+      ▼
+┌─────────────────┐
+│ Denoise         │ ← Low strength (0.05-0.15)
+└─────────────────┘
+      │
+      ▼
+    Output Frame
+```
+
+### Tuning Guide
+
+#### Problem: Burning (degrades to noise/white)
+- Lower `strength` to 0.05-0.1
+- Lower `noise_amount` to 0.008-0.01
+- Ensure `feedback_mode=True`
+
+#### Problem: Blurry/losing detail
+- Increase `sharpen_amount` to 0.15-0.25
+- Slightly increase `strength` to 0.1-0.15
+- Add subtle noise (0.01-0.015)
+
+#### Problem: Color drift
+- Ensure `color_mode="LAB"` (default)
+- Ensure `feedback_mode=True`
+
+#### Problem: No zoom visible
+- Check zoom schedule format: `"0:(1.0), 48:(1.05)"`
+- Values > 1.0 = zoom IN, < 1.0 = zoom OUT
+
+### Recommended Settings by Model
+
+**flux-schnell** (fast, 4 steps):
+```python
+strength=0.1,
+num_inference_steps=4,
+guidance_scale=1.0,
+feedback_config=FeedbackConfig(noise_amount=0.015, sharpen_amount=0.15)
+```
+
+**flux-dev** (quality, 20+ steps):
+```python
+strength=0.15,
+num_inference_steps=20,
+guidance_scale=3.5,
+feedback_config=FeedbackConfig(noise_amount=0.02, sharpen_amount=0.1)
+```
+
+---
+
+## January 2026 Updates
+
+### Minimal Fixes Applied
+
+1. **Zoom Direction Fixed** (`shared/base_engine.py`)
+   - `zoom > 1` now correctly expands content (zoom IN)
+   - Previously inverted (zoom > 1 was shrinking content)
+
+2. **Processing Order Fixed** (`flux1/pipeline.py`)
+   - FeedbackSampler processing now happens BEFORE denoise
+   - Previous: denoise → feedback → encode (wrong)
+   - Fixed: feedback → encode → denoise (correct)
+
+3. **Pixel-Space Noise** (`feedback/processor.py`)
+   - Noise added in pixel space AFTER color matching
+   - Prevents histogram matching from removing noise
+
+### Architecture Insights
+
+**Why FLUX needs different settings than Stable Diffusion:**
+
+| Aspect | Stable Diffusion | FLUX |
+|--------|-----------------|------|
+| Denoiser | U-Net | DiT (Transformer) |
+| Latent channels | 4 | 16 (FLUX.1) / 128 (FLUX.2) |
+| Strength needed | 0.3-0.5 | 0.05-0.15 |
+| Expressiveness | Lower | Much higher |
+
+FLUX's DiT is more powerful - it can maintain coherence with less intervention. Lower `strength` values are key.
+
+---
+
+## Standalone FeedbackSampler
+
+For quick testing without the full pipeline, use the standalone script:
+
+```bash
+python feedback_sampler_standalone.py \
+    --model flux-schnell \
+    --prompt "infinite fractal tunnel, cosmic energy" \
+    --iterations 48 \
+    --zoom 0.006 \
+    --feedback-denoise 0.18 \
+    --noise-amount 0.015 \
+    --sharpen 0.1 \
+    --steps 4 \
+    --cfg 1.0 \
+    --fps 12 \
+    --output ./output
+```
+
+---
+
 ## Development
 
 ```bash
