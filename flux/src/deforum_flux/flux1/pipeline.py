@@ -769,7 +769,41 @@ class Flux1DeforumPipeline:
                 # Use passed strength parameter, not motion_frame default
                 frame_strength = strength if strength is not None else motion_frame.strength
 
-                if motion_space == "pixel" and prev_image is not None:
+                # FIXED: FeedbackSampler-style processing - do pixel processing BEFORE denoise
+                if feedback_mode and first_frame is not None:
+                    # 1. Apply motion transform to previous latent (no denoise yet)
+                    transformed_latent = self.motion_engine.apply_motion(prev_latent, motion_frame.to_dict())
+
+                    # 2. Decode to pixel space
+                    transformed_image = self._decode_latent(transformed_latent)
+
+                    # 3. Apply FeedbackProcessor (color match, contrast, sharpen, noise)
+                    # Order: color match -> contrast -> sharpen -> noise (critical!)
+                    config = feedback_config or FeedbackConfig()
+                    image_np = np.array(transformed_image)
+                    reference_np = np.array(first_frame)
+                    processed_np = self.feedback_processor.process(image_np, reference_np, config)
+                    processed_image = Image.fromarray(processed_np)
+
+                    # 4. Encode processed image back to latent
+                    processed_latent = self._encode_to_latent(processed_image)
+
+                    # 5. NOW denoise (with motion_params={} since motion already applied)
+                    image, latent = self._generate_motion_frame(
+                        prev_latent=processed_latent,
+                        prompt=motion_frame.prompt or motion_frames[0].prompt,
+                        motion_params={},  # Motion already applied
+                        width=width,
+                        height=height,
+                        num_inference_steps=num_inference_steps,
+                        guidance_scale=guidance_scale,
+                        strength=frame_strength,
+                        seed=frame_seed,
+                        custom_noise=frame_noise,
+                        noise_scale=noise_scale,
+                    )
+
+                elif motion_space == "pixel" and prev_image is not None:
                     # PIXEL SPACE MOTION (traditional Deforum)
                     # Apply motion to image, then encode and denoise
                     motion_image = self._apply_image_motion(prev_image, motion_frame.to_dict())
@@ -810,20 +844,8 @@ class Flux1DeforumPipeline:
                     prev_on_device = prev_latent.to(latent.device)
                     latent = latent * (1 - feedback_decay) + prev_on_device * feedback_decay
 
-            # FeedbackSampler-style pixel-space processing
-            if feedback_mode and i > 0 and first_frame is not None:
-                # Use FeedbackProcessor for all pixel-space enhancements
-                # Order: color match -> contrast -> sharpen -> noise (critical!)
-                config = feedback_config or FeedbackConfig()
-                image_np = np.array(image)
-                reference_np = np.array(first_frame)
-                processed_np = self.feedback_processor.process(image_np, reference_np, config)
-                image = Image.fromarray(processed_np)
-
-                # Re-encode processed image back to latent for next frame
-                # This is the key FeedbackSampler insight: process in pixel space, then re-encode
-                latent = self._encode_to_latent(image)
-            else:
+            # Traditional post-processing (when feedback_mode=False)
+            if not feedback_mode:
                 # Traditional processing (when feedback_mode=False)
                 # Apply sharpening to counteract motion blur
                 if sharpen_amount > 0:
@@ -1083,7 +1105,7 @@ class Flux1DeforumPipeline:
         # Convert to tensor
         image_np = np.array(image).astype(np.float32) / 255.0
         image_tensor = torch.from_numpy(image_np).permute(2, 0, 1).unsqueeze(0)
-        image_tensor = image_tensor.to(device=self.device, dtype=torch.bfloat16)
+        image_tensor = image_tensor.to(device=self.device, dtype=torch.float32)
 
         # Scale to [-1, 1]
         image_tensor = image_tensor * 2.0 - 1.0

@@ -294,13 +294,18 @@ class BaseFluxMotionEngine(ABC, nn.Module):
         angle_rad = angle * np.pi / 180.0
         cos_angle = np.cos(angle_rad)
         sin_angle = np.sin(angle_rad)
-        
+
+        # FIXED: Invert zoom so zoom > 1 = content expands (zoom IN)
+        # Original had zoom > 1 = content shrinks (wrong direction)
+        # Using 1/zoom means we sample from a SMALLER region -> content expands
+        inv_zoom = 1.0 / zoom if zoom != 0 else 1.0
+
         # Build affine transformation matrix
-        # [zoom*cos, -zoom*sin, tx/width*2 ]
-        # [zoom*sin,  zoom*cos, ty/height*2]
+        # [inv_zoom*cos, -inv_zoom*sin, tx/width*2 ]
+        # [inv_zoom*sin,  inv_zoom*cos, ty/height*2]
         theta = torch.tensor([
-            [zoom * cos_angle, -zoom * sin_angle, tx / width * 2],
-            [zoom * sin_angle,  zoom * cos_angle, ty / height * 2]
+            [inv_zoom * cos_angle, -inv_zoom * sin_angle, tx / width * 2],
+            [inv_zoom * sin_angle,  inv_zoom * cos_angle, ty / height * 2]
         ], device=latent.device, dtype=latent.dtype)
         
         # Expand for batch
