@@ -16,25 +16,37 @@ logger = get_logger(__name__)
 
 class FluxVersion(Enum):
     """Supported FLUX model versions.
-    
+
     Uses consistent naming format: flux.{major}-{variant}
+
+    FLUX.1: 16-channel latents (original architecture)
+    FLUX.2: 128-channel latents (new architecture)
+    Klein: 128-channel, smaller/faster models (4B, 9B variants)
     """
 
+    # FLUX.1 variants (16 channels)
     FLUX_1_DEV = "flux.1-dev"
     FLUX_1_SCHNELL = "flux.1-schnell"
+
+    # FLUX.2 variants (128 channels)
     FLUX_2_DEV = "flux.2-dev"
+
+    # Klein variants (128 channels, smaller/faster)
+    FLUX_2_KLEIN_4B = "flux.2-klein-4b"
+    FLUX_2_KLEIN_9B = "flux.2-klein-9b"
 
     @property
     def model_name(self) -> str:
-        """Get BFL model name for flux.util.
-        
-        Note: BFL uses 'flux-dev' format internally, not 'flux.1-dev'
-        """
-        # Map to BFL's internal naming convention
+        """Get BFL model name / HuggingFace repo ID."""
         bfl_names = {
+            # FLUX.1
             FluxVersion.FLUX_1_DEV: "flux-dev",
             FluxVersion.FLUX_1_SCHNELL: "flux-schnell",
-            FluxVersion.FLUX_2_DEV: "flux.2-dev",  # Hypothetical FLUX.2 name
+            # FLUX.2
+            FluxVersion.FLUX_2_DEV: "flux.2-dev",
+            # Klein - HuggingFace repo IDs
+            FluxVersion.FLUX_2_KLEIN_4B: "black-forest-labs/FLUX.2-klein-4B",
+            FluxVersion.FLUX_2_KLEIN_9B: "black-forest-labs/FLUX.2-klein-9B",
         }
         return bfl_names.get(self, self.value)
 
@@ -43,7 +55,7 @@ class FluxVersion(Enum):
         """Get latent channel count."""
         if self in (FluxVersion.FLUX_1_DEV, FluxVersion.FLUX_1_SCHNELL):
             return 16
-        return 128
+        return 128  # FLUX.2 and Klein all use 128 channels
 
     @property
     def is_flux_1(self) -> bool:
@@ -51,14 +63,33 @@ class FluxVersion(Enum):
 
     @property
     def is_flux_2(self) -> bool:
-        return self == FluxVersion.FLUX_2_DEV
+        """True for all FLUX.2 variants including Klein."""
+        return self in (
+            FluxVersion.FLUX_2_DEV,
+            FluxVersion.FLUX_2_KLEIN_4B,
+            FluxVersion.FLUX_2_KLEIN_9B,
+        )
+
+    @property
+    def is_klein(self) -> bool:
+        """True for Klein models (smaller/faster FLUX.2)."""
+        return self in (
+            FluxVersion.FLUX_2_KLEIN_4B,
+            FluxVersion.FLUX_2_KLEIN_9B,
+        )
 
     @property
     def default_steps(self) -> int:
-        """Default inference steps."""
+        """Default inference steps.
+
+        Klein models support both distilled (4-step) and full (50-step) inference.
+        We default to distilled for speed - user can override for quality.
+        """
         if self == FluxVersion.FLUX_1_SCHNELL:
             return 4
-        return 28
+        if self.is_klein:
+            return 4  # Distilled default for real-time preview
+        return 28  # FLUX.1-dev, FLUX.2-dev
 
 
 def create_motion_engine(version: FluxVersion, device: str = "cuda"):
@@ -82,14 +113,14 @@ def create_motion_engine(version: FluxVersion, device: str = "cuda"):
             FluxVersion.FLUX_1_DEV: Flux1DevMotionEngine,
             FluxVersion.FLUX_1_SCHNELL: Flux1SchnellMotionEngine,
         }
+        engine_class = engine_map.get(version)
     else:
-        from deforum_flux.flux2.motion_engine import Flux2DevMotionEngine
+        # FLUX.2 and Klein all use 128-channel motion engine
+        from deforum_flux.flux2.motion_engine import Flux2MotionEngine
 
-        engine_map = {
-            FluxVersion.FLUX_2_DEV: Flux2DevMotionEngine,
-        }
+        # All FLUX.2 variants (including Klein) use same motion engine
+        engine_class = Flux2MotionEngine
 
-    engine_class = engine_map.get(version)
     if engine_class is None:
         raise PipelineError(f"No motion engine for version: {version}")
 
@@ -125,16 +156,24 @@ def create_pipeline(
     # Convert string to enum if needed
     if isinstance(version, str):
         version_map = {
-            # New consistent naming
+            # FLUX.1
             "flux.1-dev": FluxVersion.FLUX_1_DEV,
             "flux.1-schnell": FluxVersion.FLUX_1_SCHNELL,
-            "flux.2-dev": FluxVersion.FLUX_2_DEV,
-            # Legacy/alternative names for backwards compatibility
             "flux-dev": FluxVersion.FLUX_1_DEV,
             "flux-schnell": FluxVersion.FLUX_1_SCHNELL,
             "flux.1": FluxVersion.FLUX_1_DEV,
+            # FLUX.2
+            "flux.2-dev": FluxVersion.FLUX_2_DEV,
             "flux.2": FluxVersion.FLUX_2_DEV,
             "flux-2-dev": FluxVersion.FLUX_2_DEV,
+            # Klein 4B
+            "flux.2-klein-4b": FluxVersion.FLUX_2_KLEIN_4B,
+            "klein-4b": FluxVersion.FLUX_2_KLEIN_4B,
+            "klein4b": FluxVersion.FLUX_2_KLEIN_4B,
+            # Klein 9B
+            "flux.2-klein-9b": FluxVersion.FLUX_2_KLEIN_9B,
+            "klein-9b": FluxVersion.FLUX_2_KLEIN_9B,
+            "klein9b": FluxVersion.FLUX_2_KLEIN_9B,
         }
         version_enum = version_map.get(version.lower())
         if version_enum is None:
@@ -185,10 +224,39 @@ def create_flux2_pipeline(device: str = "cuda", offload: bool = False):
     return create_pipeline(FluxVersion.FLUX_2_DEV, device=device, offload=offload)
 
 
+def create_klein_pipeline(
+    device: str = "cuda",
+    offload: bool = False,
+    size: str = "4b",
+):
+    """Create FLUX.2 Klein pipeline (convenience function).
+
+    Args:
+        device: Compute device
+        offload: Enable CPU offloading
+        size: Model size - "4b" (8.4GB VRAM) or "9b" (19.6GB VRAM)
+
+    Returns:
+        Klein pipeline configured for animation
+
+    Example:
+        >>> pipe = create_klein_pipeline(size="4b")  # Fast, low VRAM
+        >>> pipe = create_klein_pipeline(size="9b")  # Higher quality
+    """
+    if size.lower() in ("4b", "4"):
+        version = FluxVersion.FLUX_2_KLEIN_4B
+    elif size.lower() in ("9b", "9"):
+        version = FluxVersion.FLUX_2_KLEIN_9B
+    else:
+        raise PipelineError(f"Unknown Klein size: {size}. Use '4b' or '9b'")
+    return create_pipeline(version, device=device, offload=offload)
+
+
 __all__ = [
     "FluxVersion",
     "create_motion_engine",
     "create_pipeline",
     "create_flux1_pipeline",
     "create_flux2_pipeline",
+    "create_klein_pipeline",
 ]

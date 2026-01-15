@@ -30,8 +30,9 @@ from deforum_flux.core import (
 )
 from deforum_flux.shared import FluxDeforumParameterAdapter, MotionFrame, BaseFluxMotionEngine
 from deforum_flux.utils import temp_directory, save_frames, encode_video_ffmpeg
+from deforum_flux.feedback import FeedbackProcessor, FeedbackConfig
 from .motion_engine import Flux2MotionEngine
-from .config import FLUX2_CONFIG
+from .config import FLUX2_CONFIG, FLUX2_ANIMATION_CONFIG
 
 
 logger = get_logger(__name__)
@@ -86,6 +87,12 @@ class Flux2DeforumPipeline:
 
         # Parameter adapter for Deforum schedules
         self.param_adapter = FluxDeforumParameterAdapter()
+
+        # Feedback processor for pixel-space enhancements
+        self.feedback_processor = FeedbackProcessor()
+
+        # Animation config with anti-burn/blur defaults
+        self.animation_config = FLUX2_ANIMATION_CONFIG
 
         # Models (lazy loaded)
         self._model = None
@@ -162,14 +169,30 @@ class Flux2DeforumPipeline:
         height: int = 1024,
         num_inference_steps: int = 28,
         guidance_scale: float = 3.5,
-        strength: float = 0.65,
+        strength: Optional[float] = None,
         fps: int = 24,
         output_path: Optional[Union[str, Path]] = None,
         seed: Optional[int] = None,
         callback: Optional[Callable[[int, int, torch.Tensor], None]] = None,
+        # Animation mode selection
+        mode: str = "pixel",
+        # Pixel mode (FeedbackSampler) parameters
+        feedback_mode: bool = True,
+        feedback_config: Optional[FeedbackConfig] = None,
+        feedback_decay: float = 0.0,
+        # Latent mode parameters
+        noise_scale: float = 0.2,
+        noise_type: str = "perlin",
+        # Shared parameters
+        color_coherence: str = "LAB",
+        sharpen_amount: float = 0.05,
     ) -> str:
         """
-        Generate Deforum-style animation using native FLUX.2.
+        Generate Deforum-style animation using native FLUX.2/Klein.
+
+        Supports two animation modes:
+        - "pixel": FeedbackSampler mode - motion + processing in pixel space
+        - "latent": Traditional mode - motion in 128-channel latent space
 
         Args:
             prompts: Single prompt or dict of {frame: prompt} for keyframes
@@ -181,13 +204,22 @@ class Flux2DeforumPipeline:
             num_frames: Total frames to generate
             width: Output width (should be multiple of 16)
             height: Output height (should be multiple of 16)
-            num_inference_steps: Denoising steps (default 28)
+            num_inference_steps: Denoising steps (4 for Klein distilled, 28 for dev)
             guidance_scale: CFG scale (3.5 typical)
-            strength: Img2img strength for subsequent frames (0.4-0.8)
+            strength: Img2img strength (default from animation_config based on mode)
             fps: Output video FPS
             output_path: Output video path (auto-generated if None)
             seed: Random seed for reproducibility
             callback: Optional progress callback(frame_idx, total, latent)
+
+            mode: Animation mode - "pixel" (recommended) or "latent"
+            feedback_mode: Enable FeedbackSampler pixel processing (pixel mode)
+            feedback_config: FeedbackConfig for pixel processing options
+            feedback_decay: Latent momentum 0.0-1.0 (0.0 recommended to prevent burn)
+            noise_scale: Noise blend amount for latent mode (0.2 recommended)
+            noise_type: "perlin" (smoother) or "gaussian"
+            color_coherence: Color matching mode - "LAB", "RGB", "HSV", or None
+            sharpen_amount: Anti-blur sharpening 0.0-1.0
 
         Returns:
             Path to output video file
@@ -206,7 +238,18 @@ class Flux2DeforumPipeline:
         if seed is None:
             seed = torch.randint(0, 2**32, (1,)).item()
 
+        # Set default strength based on mode (anti-burn/blur defaults)
+        if strength is None:
+            if mode == "pixel":
+                strength = self.animation_config.pixel_strength
+            else:
+                strength = self.animation_config.latent_strength
+
+        # Determine if using pixel mode
+        use_pixel_mode = mode == "pixel" or feedback_mode
+
         self.logger.info(f"Generating {num_frames} frames at {width}x{height}, seed={seed}")
+        self.logger.info(f"  Mode: {mode}, strength: {strength}, feedback: {use_pixel_mode}")
 
         # Generate frames
         with temp_directory(prefix="flux2_deforum_") as temp_dir:
@@ -219,6 +262,14 @@ class Flux2DeforumPipeline:
                 strength=strength,
                 seed=seed,
                 callback=callback,
+                # Mode parameters
+                use_pixel_mode=use_pixel_mode,
+                feedback_config=feedback_config,
+                feedback_decay=feedback_decay,
+                noise_scale=noise_scale,
+                noise_type=noise_type,
+                color_coherence=color_coherence,
+                sharpen_amount=sharpen_amount,
             )
 
             # Save frames
@@ -249,21 +300,46 @@ class Flux2DeforumPipeline:
         strength: float,
         seed: int,
         callback: Optional[Callable],
+        # Mode parameters
+        use_pixel_mode: bool = True,
+        feedback_config: Optional[FeedbackConfig] = None,
+        feedback_decay: float = 0.0,
+        noise_scale: float = 0.2,
+        noise_type: str = "perlin",
+        color_coherence: str = "LAB",
+        sharpen_amount: float = 0.05,
     ) -> List[Image.Image]:
         """
-        Core generation loop using native flux2.sampling.
+        Core generation loop with two modes.
 
-        Frame 0: Full text-to-image generation
-        Frames 1-N: Motion transform -> Partial denoise -> Decode
+        PIXEL MODE (FeedbackSampler):
+            Frame 0: Generate first frame
+            Frames 1-N: Motion -> Decode -> Color match -> Sharpen -> Encode -> Denoise
+
+        LATENT MODE:
+            Frame 0: Generate first frame
+            Frames 1-N: Motion on latent -> Noise blend -> Partial denoise -> Decode
         """
         frames = []
         prev_latent = None  # 128-channel latent for motion
+        first_frame = None  # Reference for color coherence
+        prev_image = None   # For frame-to-frame color matching
+
+        # Default feedback config with anti-burn settings
+        if feedback_config is None:
+            feedback_config = FeedbackConfig(
+                color_mode=color_coherence if color_coherence else "LAB",
+                contrast_boost=self.animation_config.pixel_contrast_boost,
+                sharpen_amount=sharpen_amount or self.animation_config.pixel_sharpen_amount,
+                noise_amount=self.animation_config.pixel_noise_amount,
+                noise_type=noise_type or self.animation_config.pixel_noise_type,
+            )
 
         for i, motion_frame in enumerate(tqdm(motion_frames, desc="Generating")):
             frame_seed = seed + i
 
             if i == 0:
-                # First frame: full generation
+                # First frame: full generation (same for both modes)
                 image, latent = self._generate_first_frame(
                     prompt=motion_frame.prompt or "a beautiful scene",
                     width=width,
@@ -272,22 +348,71 @@ class Flux2DeforumPipeline:
                     guidance_scale=guidance_scale,
                     seed=frame_seed,
                 )
+                first_frame = image
             else:
-                # Subsequent frames: motion + partial denoise
-                image, latent = self._generate_motion_frame(
-                    prev_latent=prev_latent,
-                    prompt=motion_frame.prompt or motion_frames[0].prompt,
-                    motion_params=motion_frame.to_dict(),
-                    width=width,
-                    height=height,
-                    num_inference_steps=num_inference_steps,
-                    guidance_scale=guidance_scale,
-                    strength=motion_frame.strength,
-                    seed=frame_seed,
-                )
+                if use_pixel_mode:
+                    # PIXEL MODE: FeedbackSampler approach
+                    # 1. Apply motion to previous latent
+                    transformed_latent = self.motion_engine.apply_motion(
+                        prev_latent, motion_frame.to_dict()
+                    )
+
+                    # 2. Decode to pixel space
+                    transformed_image = self._decode_latent(transformed_latent)
+
+                    # 3. Apply FeedbackProcessor (color match, contrast, sharpen, noise)
+                    image_np = np.array(transformed_image)
+                    reference_np = np.array(first_frame)
+                    processed_np = self.feedback_processor.process(
+                        image_np, reference_np, feedback_config
+                    )
+                    processed_image = Image.fromarray(processed_np)
+
+                    # 4. Encode processed image back to latent
+                    processed_latent = self._encode_to_latent(processed_image)
+
+                    # 5. Denoise (motion already applied, so empty motion_params)
+                    image, latent = self._generate_motion_frame(
+                        prev_latent=processed_latent,
+                        prompt=motion_frame.prompt or motion_frames[0].prompt,
+                        motion_params={},  # Motion already applied
+                        width=width,
+                        height=height,
+                        num_inference_steps=num_inference_steps,
+                        guidance_scale=guidance_scale,
+                        strength=strength,
+                        seed=frame_seed,
+                    )
+                else:
+                    # LATENT MODE: Traditional approach
+                    image, latent = self._generate_motion_frame(
+                        prev_latent=prev_latent,
+                        prompt=motion_frame.prompt or motion_frames[0].prompt,
+                        motion_params=motion_frame.to_dict(),
+                        width=width,
+                        height=height,
+                        num_inference_steps=num_inference_steps,
+                        guidance_scale=guidance_scale,
+                        strength=strength,
+                        seed=frame_seed,
+                        noise_scale=noise_scale,
+                    )
+
+                    # Apply color coherence in latent mode (post-processing)
+                    if color_coherence and first_frame is not None:
+                        image = self._match_color(image, first_frame, color_coherence)
+
+                    # Apply sharpening in latent mode
+                    if sharpen_amount > 0:
+                        image = self._sharpen_image(image, sharpen_amount)
+
+                # Apply feedback decay (latent momentum) if enabled
+                if feedback_decay > 0 and prev_latent is not None:
+                    latent = latent * (1 - feedback_decay) + prev_latent.to(latent.device) * feedback_decay
 
             frames.append(image)
             prev_latent = latent
+            prev_image = image
 
             # Callback
             if callback:
@@ -387,6 +512,7 @@ class Flux2DeforumPipeline:
         guidance_scale: float,
         strength: float,
         seed: int,
+        noise_scale: float = 0.2,
     ) -> tuple:
         """Generate frame with motion applied to previous latent."""
         from flux2.sampling import (
@@ -430,7 +556,9 @@ class Flux2DeforumPipeline:
         noise_tokens = noise_tokens.unsqueeze(0).to(self.device, dtype=torch.bfloat16)
 
         # Blend latent with noise at starting timestep
-        img_tokens = img_tokens * (1 - t) + noise_tokens * t
+        # Scale noise amount to prevent blur (lower = smoother animation)
+        t_scaled = t * noise_scale
+        img_tokens = img_tokens * (1 - t_scaled) + noise_tokens * t_scaled
 
         # Encode text (keep on CPU - Mistral 24B too large for GPU)
         txt_tokens = self.text_encoder([prompt])
@@ -620,6 +748,65 @@ class Flux2DeforumPipeline:
         )
         return image
 
+    def _match_color(
+        self,
+        source: Image.Image,
+        reference: Image.Image,
+        mode: str = "LAB"
+    ) -> Image.Image:
+        """Match color histogram of source to reference.
+
+        Args:
+            source: Image to adjust
+            reference: Target color distribution
+            mode: "LAB" (perceptual), "RGB", or "HSV"
+        """
+        src_np = np.array(source).astype(np.float32)
+        ref_np = np.array(reference).astype(np.float32)
+
+        if mode == "LAB":
+            try:
+                import cv2
+                src_lab = cv2.cvtColor(src_np.astype(np.uint8), cv2.COLOR_RGB2LAB).astype(np.float32)
+                ref_lab = cv2.cvtColor(ref_np.astype(np.uint8), cv2.COLOR_RGB2LAB).astype(np.float32)
+
+                for i in range(3):
+                    src_mean, src_std = src_lab[:, :, i].mean(), src_lab[:, :, i].std() + 1e-6
+                    ref_mean, ref_std = ref_lab[:, :, i].mean(), ref_lab[:, :, i].std() + 1e-6
+                    src_lab[:, :, i] = (src_lab[:, :, i] - src_mean) * (ref_std / src_std) + ref_mean
+
+                src_lab = np.clip(src_lab, 0, 255).astype(np.uint8)
+                result = cv2.cvtColor(src_lab, cv2.COLOR_LAB2RGB)
+                return Image.fromarray(result)
+            except ImportError:
+                mode = "RGB"  # Fallback
+
+        # RGB mode (fallback)
+        result = np.zeros_like(src_np)
+        for c in range(3):
+            src_mean, src_std = src_np[:, :, c].mean(), src_np[:, :, c].std() + 1e-6
+            ref_mean, ref_std = ref_np[:, :, c].mean(), ref_np[:, :, c].std() + 1e-6
+            result[:, :, c] = (src_np[:, :, c] - src_mean) * (ref_std / src_std) + ref_mean
+
+        result = np.clip(result, 0, 255).astype(np.uint8)
+        return Image.fromarray(result)
+
+    def _sharpen_image(self, image: Image.Image, amount: float) -> Image.Image:
+        """Apply unsharp mask sharpening to counteract motion blur.
+
+        Args:
+            image: Input image
+            amount: Sharpening strength 0.0-1.0
+        """
+        if amount <= 0:
+            return image
+
+        from PIL import ImageFilter
+        sharpened = image.filter(
+            ImageFilter.UnsharpMask(radius=1, percent=int(amount * 150), threshold=1)
+        )
+        return sharpened
+
     def get_info(self) -> Dict[str, Any]:
         """Get pipeline configuration info."""
         return {
@@ -631,6 +818,7 @@ class Flux2DeforumPipeline:
             "backend": "native_flux2_sampling",
             "latent_channels": 128,
             "text_encoder": "mistral-3-small",
+            "animation_modes": ["pixel", "latent"],
         }
 
 

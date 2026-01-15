@@ -1,4 +1,11 @@
-"""FLUX.2 Configuration - Configurable defaults."""
+"""FLUX.2 Configuration - Configurable defaults.
+
+IMPORTANT: FLUX uses different latent architecture than Stable Diffusion.
+Original Deforum was built for SD's 4-channel latents. FLUX.2 uses 128 channels.
+Animation parameters need to be much more conservative to prevent:
+- Burning (contrast/saturation accumulation in pixel mode)
+- Blurring (detail loss in latent mode)
+"""
 
 from dataclasses import dataclass
 from typing import Dict, Any, Tuple
@@ -7,7 +14,7 @@ from typing import Dict, Any, Tuple
 @dataclass(frozen=True)
 class Flux2Config:
     """Configuration for FLUX.2 models.
-    
+
     This is a frozen dataclass to ensure configuration immutability
     and prevent accidental modification during runtime.
     """
@@ -17,7 +24,7 @@ class Flux2Config:
     num_channel_groups: int = 8
     channels_per_group: int = 16
 
-    # Generation defaults
+    # Generation defaults (single image)
     num_inference_steps: int = 28
     guidance_scale: float = 3.5
     strength: float = 0.65
@@ -56,5 +63,35 @@ class Flux2Config:
         }
 
 
-# Default instance
+@dataclass(frozen=True)
+class Flux2AnimationConfig:
+    """Animation-specific defaults for FLUX.2/Klein.
+
+    These are tuned to prevent burning and blurring over multiple frames.
+    Original Deforum used 0.2-0.4 strength - we need similar conservative values.
+    """
+
+    # Latent mode defaults (anti-blur)
+    latent_strength: float = 0.3          # Much lower than 0.65 default
+    latent_noise_scale: float = 0.2       # Lower noise injection
+    latent_noise_type: str = "perlin"     # Smoother than gaussian
+
+    # Pixel mode defaults (anti-burn)
+    pixel_strength: float = 0.25          # Even lower for pixel mode
+    pixel_contrast_boost: float = 1.0     # NO contrast boost (prevents burn)
+    pixel_sharpen_amount: float = 0.05    # Minimal sharpening
+    pixel_noise_amount: float = 0.01      # Very low noise
+    pixel_noise_type: str = "perlin"      # Coherent noise
+    pixel_feedback_decay: float = 0.0     # NO latent momentum
+
+    # Color coherence (both modes)
+    color_coherence: str = "LAB"          # Best perceptual matching
+
+    # Klein-specific (4-step distilled)
+    klein_steps: int = 4                  # Distilled inference
+    klein_strength: float = 0.2           # Even more conservative for fast models
+
+
+# Default instances
 FLUX2_CONFIG = Flux2Config()
+FLUX2_ANIMATION_CONFIG = Flux2AnimationConfig()
