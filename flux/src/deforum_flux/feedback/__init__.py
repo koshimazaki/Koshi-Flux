@@ -24,11 +24,12 @@ Example:
     ... )
 """
 
-from .processor import FeedbackProcessor, FeedbackConfig
+from .processor import FeedbackProcessor, FeedbackConfig, DetectionResult
 from .color_matching import ColorMatcher
 
 __all__ = [
     "FeedbackProcessor",
     "FeedbackConfig",
+    "DetectionResult",
     "ColorMatcher",
 ]

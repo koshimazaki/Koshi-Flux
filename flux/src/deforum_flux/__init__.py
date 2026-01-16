@@ -65,6 +65,8 @@ from deforum_flux.flux2 import (
     Flux2MotionEngine,
     Flux2DevMotionEngine,
     FLUX2_CONFIG,
+    FLUX2_ANIMATION_CONFIG,
+    AdaptiveCorrectionConfig,
 )
 
 # Shared components
@@ -118,6 +120,7 @@ except ImportError:
 from deforum_flux.feedback import (
     FeedbackProcessor,
     FeedbackConfig,
+    DetectionResult,
     ColorMatcher,
 )
 
@@ -141,6 +144,8 @@ __all__ = [
     "Flux2MotionEngine",
     "Flux2DevMotionEngine",
     "FLUX2_CONFIG",
+    "FLUX2_ANIMATION_CONFIG",
+    "AdaptiveCorrectionConfig",
     # Shared
     "BaseFluxMotionEngine",
     "FluxDeforumParameterAdapter",
@@ -160,6 +165,7 @@ __all__ = [
     # Feedback
     "FeedbackProcessor",
     "FeedbackConfig",
+    "DetectionResult",
     "ColorMatcher",
 ]
 
