@@ -5,11 +5,13 @@ Uses Black Forest Labs' native flux2.sampling API for highest quality generation
 Motion transforms applied in 128-channel latent space between denoising steps.
 
 Architecture:
-    Text Prompt -> Mistral-3 Encoding -> Noise -> Denoise -> Decode -> Motion -> Loop
+    Text Prompt -> Text Encoding -> Noise -> Denoise -> Decode -> Motion -> Loop
 
 Key Differences from FLUX.1:
 - 128-channel latent space (vs 16)
-- Single Mistral-3 24B VLM text encoder (vs dual CLIP+T5)
+- Single text encoder (vs dual CLIP+T5 in FLUX.1)
+  - flux.2-dev: Mistral-3 24B VLM (~48GB)
+  - Klein 4B/9B: Qwen3 (~8-18GB, much faster)
 - Completely retrained VAE (not compatible with FLUX.1)
 - Position IDs for image tokens (thw format)
 """
@@ -109,12 +111,16 @@ class Flux2DeforumPipeline:
             return
 
         try:
-            from flux2.util import load_ae, load_flow_model, load_mistral_small_embedder
+            from flux2.util import load_ae, load_flow_model, load_text_encoder
 
             self.logger.info(f"Loading FLUX.2 models: {self.model_name}")
 
-            # Load components
-            self._text_encoder = load_mistral_small_embedder(
+            # Load components - use model-aware text encoder loader
+            # Automatically selects correct encoder:
+            # - flux.2-dev → Mistral-3 24B
+            # - flux.2-klein-4b/9b → Qwen3 (much smaller)
+            self._text_encoder = load_text_encoder(
+                self.model_name,
                 device="cpu" if self.offload else self.device
             )
             self._model = load_flow_model(
