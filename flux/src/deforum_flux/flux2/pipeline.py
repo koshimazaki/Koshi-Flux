@@ -30,9 +30,9 @@ from deforum_flux.core import (
 )
 from deforum_flux.shared import FluxDeforumParameterAdapter, MotionFrame, BaseFluxMotionEngine
 from deforum_flux.utils import temp_directory, save_frames, encode_video_ffmpeg
-from deforum_flux.feedback import FeedbackProcessor, FeedbackConfig
+from deforum_flux.feedback import FeedbackProcessor, FeedbackConfig, DetectionResult
 from .motion_engine import Flux2MotionEngine
-from .config import FLUX2_CONFIG, FLUX2_ANIMATION_CONFIG
+from .config import FLUX2_CONFIG, FLUX2_ANIMATION_CONFIG, AdaptiveCorrectionConfig
 
 
 logger = get_logger(__name__)
@@ -186,6 +186,8 @@ class Flux2DeforumPipeline:
         # Shared parameters
         color_coherence: str = "LAB",
         sharpen_amount: float = 0.05,
+        # Opt-in adaptive corrections (anti-burn/anti-blur)
+        correction_config: Optional[AdaptiveCorrectionConfig] = None,
     ) -> str:
         """
         Generate Deforum-style animation using native FLUX.2/Klein.
@@ -220,6 +222,13 @@ class Flux2DeforumPipeline:
             noise_type: "perlin" (smoother) or "gaussian"
             color_coherence: Color matching mode - "LAB", "RGB", "HSV", or None
             sharpen_amount: Anti-blur sharpening 0.0-1.0
+            correction_config: Opt-in AdaptiveCorrectionConfig for anti-burn/blur:
+                - adaptive_strength: Reduce strength when motion is high
+                - burn_detection: Auto-detect and correct contrast accumulation
+                - blur_detection: Auto-detect detail loss and sharpen
+                - latent_ema: Smooth latent transitions (reduces flickering)
+                - soft_clamp: Prevent extreme pixel values
+                - cadence_skip: Skip denoising on high-motion frames
 
         Returns:
             Path to output video file
@@ -250,6 +259,8 @@ class Flux2DeforumPipeline:
 
         self.logger.info(f"Generating {num_frames} frames at {width}x{height}, seed={seed}")
         self.logger.info(f"  Mode: {mode}, strength: {strength}, feedback: {use_pixel_mode}")
+        if correction_config:
+            self.logger.info(f"  Adaptive corrections: {correction_config}")
 
         # Generate frames
         with temp_directory(prefix="flux2_deforum_") as temp_dir:
@@ -270,6 +281,7 @@ class Flux2DeforumPipeline:
                 noise_type=noise_type,
                 color_coherence=color_coherence,
                 sharpen_amount=sharpen_amount,
+                correction_config=correction_config,
             )
 
             # Save frames
@@ -308,6 +320,7 @@ class Flux2DeforumPipeline:
         noise_type: str = "perlin",
         color_coherence: str = "LAB",
         sharpen_amount: float = 0.05,
+        correction_config: Optional[AdaptiveCorrectionConfig] = None,
     ) -> List[Image.Image]:
         """
         Core generation loop with two modes.
@@ -324,6 +337,7 @@ class Flux2DeforumPipeline:
         prev_latent = None  # 128-channel latent for motion
         first_frame = None  # Reference for color coherence
         prev_image = None   # For frame-to-frame color matching
+        detection_history = []  # Track detection results for debugging
 
         # Default feedback config with anti-burn settings
         if feedback_config is None:
@@ -335,8 +349,24 @@ class Flux2DeforumPipeline:
                 noise_type=noise_type or self.animation_config.pixel_noise_type,
             )
 
+        # Use default correction config if None (all features disabled)
+        if correction_config is None:
+            correction_config = AdaptiveCorrectionConfig()
+
         for i, motion_frame in enumerate(tqdm(motion_frames, desc="Generating")):
             frame_seed = seed + i
+            motion_dict = motion_frame.to_dict()
+            detection = None
+
+            # Compute effective strength (adaptive if enabled)
+            effective_strength = strength
+            if correction_config.adaptive_strength and i > 0:
+                effective_strength = correction_config.compute_adaptive_strength(motion_dict)
+                if effective_strength != strength:
+                    self.logger.debug(f"Frame {i}: adaptive strength {effective_strength:.3f}")
+
+            # Check for cadence skip (skip denoising on high-motion frames)
+            skip_denoise = correction_config.should_skip_denoise(motion_dict, i)
 
             if i == 0:
                 # First frame: full generation (same for both modes)
@@ -349,29 +379,59 @@ class Flux2DeforumPipeline:
                     seed=frame_seed,
                 )
                 first_frame = image
+            elif skip_denoise:
+                # CADENCE SKIP: Just apply motion, no denoising
+                self.logger.debug(f"Frame {i}: cadence skip (high motion)")
+                transformed_latent = self.motion_engine.apply_motion(prev_latent, motion_dict)
+                image = self._decode_latent(transformed_latent)
+                latent = transformed_latent
             else:
                 if use_pixel_mode:
                     # PIXEL MODE: FeedbackSampler approach
                     # 1. Apply motion to previous latent
                     transformed_latent = self.motion_engine.apply_motion(
-                        prev_latent, motion_frame.to_dict()
+                        prev_latent, motion_dict
                     )
 
                     # 2. Decode to pixel space
                     transformed_image = self._decode_latent(transformed_latent)
 
-                    # 3. Apply FeedbackProcessor (color match, contrast, sharpen, noise)
+                    # 3. Apply soft clamping if enabled (before other processing)
+                    if correction_config.soft_clamp:
+                        transformed_np = np.array(transformed_image)
+                        transformed_np = self.feedback_processor.apply_soft_clamp(
+                            transformed_np,
+                            threshold=correction_config.soft_clamp_threshold,
+                            scale=correction_config.soft_clamp_scale
+                        )
+                        transformed_image = Image.fromarray(transformed_np)
+
+                    # 4. Apply FeedbackProcessor with optional detection
                     image_np = np.array(transformed_image)
                     reference_np = np.array(first_frame)
-                    processed_np = self.feedback_processor.process(
-                        image_np, reference_np, feedback_config
-                    )
+                    prev_np = np.array(prev_image) if prev_image else None
+
+                    if correction_config.burn_detection or correction_config.blur_detection:
+                        # Use detection-aware processing
+                        processed_np, detection = self.feedback_processor.process_with_detection(
+                            image_np, reference_np, prev_np,
+                            config=feedback_config,
+                            burn_threshold=correction_config.burn_threshold,
+                            blur_threshold=correction_config.blur_threshold,
+                            auto_correct=True,
+                        )
+                        detection_history.append(detection)
+                    else:
+                        # Standard processing
+                        processed_np = self.feedback_processor.process(
+                            image_np, reference_np, feedback_config
+                        )
                     processed_image = Image.fromarray(processed_np)
 
-                    # 4. Encode processed image back to latent
+                    # 5. Encode processed image back to latent
                     processed_latent = self._encode_to_latent(processed_image)
 
-                    # 5. Denoise (motion already applied, so empty motion_params)
+                    # 6. Denoise (motion already applied, so empty motion_params)
                     image, latent = self._generate_motion_frame(
                         prev_latent=processed_latent,
                         prompt=motion_frame.prompt or motion_frames[0].prompt,
@@ -380,7 +440,7 @@ class Flux2DeforumPipeline:
                         height=height,
                         num_inference_steps=num_inference_steps,
                         guidance_scale=guidance_scale,
-                        strength=strength,
+                        strength=effective_strength,
                         seed=frame_seed,
                     )
                 else:
@@ -388,12 +448,12 @@ class Flux2DeforumPipeline:
                     image, latent = self._generate_motion_frame(
                         prev_latent=prev_latent,
                         prompt=motion_frame.prompt or motion_frames[0].prompt,
-                        motion_params=motion_frame.to_dict(),
+                        motion_params=motion_dict,
                         width=width,
                         height=height,
                         num_inference_steps=num_inference_steps,
                         guidance_scale=guidance_scale,
-                        strength=strength,
+                        strength=effective_strength,
                         seed=frame_seed,
                         noise_scale=noise_scale,
                     )
@@ -406,9 +466,23 @@ class Flux2DeforumPipeline:
                     if sharpen_amount > 0:
                         image = self._sharpen_image(image, sharpen_amount)
 
+                    # Apply soft clamping in latent mode if enabled
+                    if correction_config.soft_clamp:
+                        image_np = np.array(image)
+                        image_np = self.feedback_processor.apply_soft_clamp(
+                            image_np,
+                            threshold=correction_config.soft_clamp_threshold,
+                            scale=correction_config.soft_clamp_scale
+                        )
+                        image = Image.fromarray(image_np)
+
                 # Apply feedback decay (latent momentum) if enabled
                 if feedback_decay > 0 and prev_latent is not None:
                     latent = latent * (1 - feedback_decay) + prev_latent.to(latent.device) * feedback_decay
+
+            # Apply latent EMA smoothing if enabled (reduces flickering)
+            if correction_config.latent_ema > 0 and prev_latent is not None and i > 0:
+                latent = latent * (1 - correction_config.latent_ema) + prev_latent.to(latent.device) * correction_config.latent_ema
 
             frames.append(image)
             prev_latent = latent
