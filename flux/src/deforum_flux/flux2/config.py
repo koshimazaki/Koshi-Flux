@@ -161,7 +161,8 @@ class AdaptiveCorrectionConfig:
         motion_intensity = zoom + angle + tx + ty + tz
 
         # Reduce strength proportionally to motion
-        adjusted = self.adaptive_strength_base - (motion_intensity * self.adaptive_strength_sensitivity)
+        reduction = motion_intensity * self.adaptive_strength_sensitivity
+        adjusted = self.adaptive_strength_base - reduction
         return max(self.adaptive_strength_min, adjusted)
 
     def get_motion_intensity(self, motion_params: Dict[str, Any]) -> float:
