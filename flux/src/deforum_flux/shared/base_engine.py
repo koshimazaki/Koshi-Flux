@@ -264,28 +264,41 @@ class BaseFluxMotionEngine(ABC, nn.Module):
     def _apply_geometric_transform(
         self,
         latent: torch.Tensor,
-        motion_params: Dict[str, float]
+        motion_params: Dict[str, float],
+        grid_snap: int = 8
     ) -> torch.Tensor:
         """
         Apply 2D geometric transformations (zoom, rotate, translate).
-        
-        This works identically regardless of channel count.
-        
+
+        IMPORTANT: For DiT models (like Flux), translations are snapped to grid
+        boundaries to prevent token misalignment blur. Flux uses 16x16 pixel
+        patches (f=8 VAE, 2x2 patchification), so grid_snap=8 keeps latent
+        tokens aligned.
+
         Args:
             latent: Input latent (B, C, H, W)
             motion_params: Motion parameters
-            
+            grid_snap: Snap translations to nearest N pixels (8 or 16 for Flux)
+
         Returns:
             Geometrically transformed latent
         """
         batch_size, channels, height, width = latent.shape
-        
+
         # Extract parameters with defaults
         zoom = motion_params.get("zoom", 1.0)
         angle = motion_params.get("angle", 0.0)
         tx = motion_params.get("translation_x", 0.0)
         ty = motion_params.get("translation_y", 0.0)
-        
+
+        # FLUX DiT FIX: Snap translations to grid to prevent token misalignment
+        # Flux processes 16x16 pixel patches; non-aligned shifts cause blur
+        if grid_snap > 0:
+            # Convert pixel translation to latent space (8x downscale)
+            # Then snap to grid and convert back
+            tx = round(tx / grid_snap) * grid_snap
+            ty = round(ty / grid_snap) * grid_snap
+
         # Skip if no transform needed
         if zoom == 1.0 and angle == 0.0 and tx == 0.0 and ty == 0.0:
             return latent
@@ -315,9 +328,10 @@ class BaseFluxMotionEngine(ABC, nn.Module):
         grid = F.affine_grid(theta, latent.size(), align_corners=False)
         
         # Apply transformation with reflection padding (classic Deforum behavior)
+        # Use bicubic for sharper results (bilinear causes blur on zoom)
         transformed = F.grid_sample(
             latent, grid,
-            mode='bilinear',
+            mode='bicubic',
             padding_mode='reflection',
             align_corners=False
         )

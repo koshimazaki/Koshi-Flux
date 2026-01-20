@@ -101,6 +101,8 @@ class Flux2DeforumPipeline:
         self._ae = None
         self._text_encoder = None
         self._loaded = False
+        self._is_klein = False
+        self._vae_downscale = 8  # Default for standard FLUX, Klein uses 16
 
         self.logger.info(f"Flux2DeforumPipeline initialized: {model_name} on {device}")
 
@@ -127,10 +129,15 @@ class Flux2DeforumPipeline:
                 self.model_name,
                 device="cpu" if self.offload else self.device
             )
-            self._ae = load_ae(
-                self.model_name,
-                device="cpu" if self.offload else self.device
-            )
+
+            # Klein models have VAE at different location - handle specially
+            if "klein" in self.model_name.lower():
+                self._ae = self._load_klein_ae()
+            else:
+                self._ae = load_ae(
+                    self.model_name,
+                    device="cpu" if self.offload else self.device
+                )
 
             if self.offload:
                 self.logger.info("Models loaded with CPU offload enabled")
@@ -146,6 +153,43 @@ class Flux2DeforumPipeline:
             ) from e
         except Exception as e:
             raise FluxModelError(f"Failed to load models: {e}", model_name=self.model_name) from e
+
+    def _load_klein_ae(self):
+        """Load VAE for Klein models using diffusers with channel adapter.
+
+        Klein/FLUX.2 uses:
+        - VAE with 32 latent channels
+        - DiT with 128 channels (32 * 2x2 patchify)
+
+        We wrap diffusers VAE to handle 128<->32 channel conversion.
+        """
+        from diffusers import AutoencoderKL
+
+        repo_map = {
+            "flux.2-klein-4b": "black-forest-labs/FLUX.2-klein-4B",
+            "flux.2-klein-9b": "black-forest-labs/FLUX.2-klein-9B",
+        }
+        repo_id = repo_map.get(self.model_name.lower(), repo_map["flux.2-klein-4b"])
+
+        self.logger.info(f"Loading Klein VAE from {repo_id}")
+
+        vae = AutoencoderKL.from_pretrained(
+            repo_id,
+            subfolder="vae",
+            torch_dtype=torch.bfloat16,
+        )
+
+        device = "cpu" if self.offload else self.device
+        vae = vae.to(device).eval()
+
+        # Wrap with channel adapter
+        self._klein_vae = vae
+        self._is_klein = True
+        # Klein VAE uses 16x downscale (4 blocks), not 8x like standard FLUX
+        self._vae_downscale = 16
+
+        self.logger.info("Klein VAE loaded successfully (16x downscale)")
+        return vae
 
     @property
     def model(self):
@@ -191,7 +235,10 @@ class Flux2DeforumPipeline:
         noise_type: str = "perlin",
         # Shared parameters
         color_coherence: str = "LAB",
-        sharpen_amount: float = 0.05,
+        sharpen_amount: float = 0.3,  # Increased from 0.05 - Flux needs aggressive sharpening
+        # FLUX DiT anti-blur: append texture keywords to prompts
+        # Forces model to fill 16x16 patches with high-frequency detail
+        texture_prompt: Optional[str] = "detailed texture, film grain, sharp focus",
         # Opt-in adaptive corrections (anti-burn/anti-blur)
         correction_config: Optional[AdaptiveCorrectionConfig] = None,
     ) -> str:
@@ -287,6 +334,7 @@ class Flux2DeforumPipeline:
                 noise_type=noise_type,
                 color_coherence=color_coherence,
                 sharpen_amount=sharpen_amount,
+                texture_prompt=texture_prompt,
                 correction_config=correction_config,
             )
 
@@ -326,6 +374,7 @@ class Flux2DeforumPipeline:
         noise_type: str = "perlin",
         color_coherence: str = "LAB",
         sharpen_amount: float = 0.05,
+        texture_prompt: Optional[str] = None,
         correction_config: Optional[AdaptiveCorrectionConfig] = None,
     ) -> List[Image.Image]:
         """
@@ -364,6 +413,14 @@ class Flux2DeforumPipeline:
             motion_dict = motion_frame.to_dict()
             detection = None
 
+            # FLUX DiT FIX: Append texture keywords to force high-frequency detail
+            # This prevents the model from smoothing 16x16 patches into blur
+            base_prompt = motion_frame.prompt or motion_frames[0].prompt or "a beautiful scene"
+            if texture_prompt:
+                frame_prompt = f"{base_prompt}, {texture_prompt}"
+            else:
+                frame_prompt = base_prompt
+
             # Compute effective strength (adaptive if enabled)
             effective_strength = strength
             if correction_config.adaptive_strength and i > 0:
@@ -377,7 +434,7 @@ class Flux2DeforumPipeline:
             if i == 0:
                 # First frame: full generation (same for both modes)
                 image, latent = self._generate_first_frame(
-                    prompt=motion_frame.prompt or "a beautiful scene",
+                    prompt=frame_prompt,
                     width=width,
                     height=height,
                     num_inference_steps=num_inference_steps,
@@ -440,7 +497,7 @@ class Flux2DeforumPipeline:
                     # 6. Denoise (motion already applied, so empty motion_params)
                     image, latent = self._generate_motion_frame(
                         prev_latent=processed_latent,
-                        prompt=motion_frame.prompt or motion_frames[0].prompt,
+                        prompt=frame_prompt,
                         motion_params={},  # Motion already applied
                         width=width,
                         height=height,
@@ -453,7 +510,7 @@ class Flux2DeforumPipeline:
                     # LATENT MODE: Traditional approach
                     image, latent = self._generate_motion_frame(
                         prev_latent=prev_latent,
-                        prompt=motion_frame.prompt or motion_frames[0].prompt,
+                        prompt=frame_prompt,
                         motion_params=motion_dict,
                         width=width,
                         height=height,
@@ -525,9 +582,9 @@ class Flux2DeforumPipeline:
         # Set generator for reproducibility
         generator = torch.Generator(device=self.device).manual_seed(seed)
 
-        # Compute latent dimensions
-        latent_h = height // 8
-        latent_w = width // 8
+        # Compute latent dimensions (Klein uses 16x downscale, standard FLUX uses 8x)
+        latent_h = height // self._vae_downscale
+        latent_w = width // self._vae_downscale
 
         # Create initial noise latent (128 channels for FLUX.2)
         x = torch.randn(
@@ -613,12 +670,17 @@ class Flux2DeforumPipeline:
             image = self._decode_latent(transformed_latent)
             return image, transformed_latent
 
-        latent_h = height // 8
-        latent_w = width // 8
+        latent_h = height // self._vae_downscale
+        latent_w = width // self._vae_downscale
 
         # Get noise for blending
         generator = torch.Generator(device=self.device).manual_seed(seed)
-        noise = torch.randn_like(transformed_latent, generator=generator)
+        noise = torch.randn(
+            transformed_latent.shape,
+            device=transformed_latent.device,
+            dtype=transformed_latent.dtype,
+            generator=generator
+        )
 
         # Process latent to token format
         img_tokens, img_ids = prc_img(transformed_latent[0])
@@ -761,13 +823,28 @@ class Flux2DeforumPipeline:
 
     @torch.no_grad()
     def _decode_latent(self, latent: torch.Tensor) -> Image.Image:
-        """Decode 128-channel latent to PIL Image using FLUX.2 autoencoder."""
+        """Decode latent to PIL Image using FLUX.2 autoencoder.
+
+        For Klein (diffusers VAE): unpatchify 128ch -> 32ch, then decode
+        For native flux2: ae.decode handles 128ch directly
+        """
         if self.offload:
             self.ae.to(self.device)
 
+        latent = latent.to(self.device)
+
         with torch.autocast(device_type=self.device.replace("mps", "cpu"), dtype=torch.bfloat16):
-            # AE expects (B, 128, H, W)
-            x = self.ae.decode(latent.to(self.device))
+            if getattr(self, '_is_klein', False):
+                # Klein uses diffusers VAE with 32 channels
+                # Unpatchify: 128ch -> 32ch (reverse 2x2 patchify)
+                latent_32 = self._unpatchify(latent)
+                # NOTE: BFL native autoencoder doesn't use scaling factor
+                # Diffusers VAE expects unscaled latents from DiT
+                # Diffusers VAE decode returns DecoderOutput
+                x = self.ae.decode(latent_32).sample
+            else:
+                # Native flux2 ae handles 128ch
+                x = self.ae.decode(latent)
 
         if self.offload:
             self.ae.cpu()
@@ -781,10 +858,57 @@ class Flux2DeforumPipeline:
 
         return Image.fromarray(x)
 
+    def _unpatchify(self, latent: torch.Tensor) -> torch.Tensor:
+        """Convert 128-channel patched latent to 32-channel VAE latent.
+
+        FLUX.2 patchify: (B, 32, H, W) -> (B, 128, H/2, W/2)
+        This reverses it: (B, 128, H/2, W/2) -> (B, 32, H, W)
+        """
+        B, C, H, W = latent.shape
+        # 128 = 32 * 4 (2x2 patches)
+        latent = latent.reshape(B, 32, 4, H, W)
+        latent = latent.permute(0, 1, 3, 4, 2)  # B, 32, H, W, 4
+        latent = latent.reshape(B, 32, H, W, 2, 2)
+        latent = latent.permute(0, 1, 2, 4, 3, 5)  # B, 32, H, 2, W, 2
+        latent = latent.reshape(B, 32, H * 2, W * 2)
+        return latent
+
+    def _patchify(self, latent: torch.Tensor) -> torch.Tensor:
+        """Convert 32-channel VAE latent to 128-channel patched latent.
+
+        (B, 32, H, W) -> (B, 128, H/2, W/2)
+        """
+        B, C, H, W = latent.shape
+        latent = latent.reshape(B, 32, H // 2, 2, W // 2, 2)
+        latent = latent.permute(0, 1, 2, 4, 3, 5)  # B, 32, H/2, W/2, 2, 2
+        latent = latent.reshape(B, 32, H // 2, W // 2, 4)
+        latent = latent.permute(0, 1, 4, 2, 3)  # B, 32, 4, H/2, W/2
+        latent = latent.reshape(B, 128, H // 2, W // 2)
+        return latent
+
     @torch.no_grad()
-    def _encode_to_latent(self, image: Image.Image) -> torch.Tensor:
-        """Encode PIL Image to 128-channel latent using FLUX.2 autoencoder."""
+    def _encode_to_latent(
+        self,
+        image: Image.Image,
+        pre_sharpen: float = 0.3
+    ) -> torch.Tensor:
+        """Encode PIL Image to 128-channel latent using FLUX.2 autoencoder.
+
+        IMPORTANT: Pre-sharpening before encode is critical for Flux img2img.
+        The expert insight: Flux Flow Matching interprets blur as signal, so
+        if input has interpolation blur, output will be "sharp blur".
+        Pre-sharpening destroys interpolation artifacts before encoding.
+
+        Args:
+            image: Input PIL image
+            pre_sharpen: Sharpening amount (0.0-1.0). Default 0.3 per expert advice.
+        """
         from flux2.sampling import default_prep
+
+        # FLUX FIX: Pre-sharpen to destroy interpolation artifacts
+        # This tricks the Flow Matcher into seeing texture instead of blur
+        if pre_sharpen > 0:
+            image = self._sharpen_image(image, pre_sharpen)
 
         # Prepare image (resize, crop, normalize)
         img_tensor = default_prep(image, limit_pixels=2024**2)
@@ -796,7 +920,17 @@ class Flux2DeforumPipeline:
         if self.offload:
             self.ae.to(self.device)
 
-        latent = self.ae.encode(img_tensor)
+        if getattr(self, '_is_klein', False):
+            # Klein uses diffusers VAE with 32 channels
+            # Use mean not sample() to avoid adding noise
+            latent_32 = self.ae.encode(img_tensor).latent_dist.mean
+            # NOTE: BFL native autoencoder doesn't use scaling factor
+            # DiT expects unscaled latents from VAE
+            # Patchify: 32ch -> 128ch
+            latent = self._patchify(latent_32)
+        else:
+            # Native flux2 ae returns 128ch directly
+            latent = self.ae.encode(img_tensor)
 
         if self.offload:
             self.ae.cpu()

@@ -44,9 +44,9 @@ class FluxVersion(Enum):
             FluxVersion.FLUX_1_SCHNELL: "flux-schnell",
             # FLUX.2
             FluxVersion.FLUX_2_DEV: "flux.2-dev",
-            # Klein - HuggingFace repo IDs
-            FluxVersion.FLUX_2_KLEIN_4B: "black-forest-labs/FLUX.2-klein-4B",
-            FluxVersion.FLUX_2_KLEIN_9B: "black-forest-labs/FLUX.2-klein-9B",
+            # Klein - use short names (flux2 lib handles HF download internally)
+            FluxVersion.FLUX_2_KLEIN_4B: "flux.2-klein-4b",
+            FluxVersion.FLUX_2_KLEIN_9B: "flux.2-klein-9b",
         }
         return bfl_names.get(self, self.value)
 
