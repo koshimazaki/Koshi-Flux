@@ -113,14 +113,28 @@ class Flux2DeforumPipeline:
             return
 
         try:
-            from flux2.util import load_ae, load_flow_model, load_text_encoder
+            from flux2.util import load_flow_model, load_text_encoder, FLUX2_MODEL_INFO
 
             self.logger.info(f"Loading FLUX.2 models: {self.model_name}")
 
-            # Load components - use model-aware text encoder loader
-            # Automatically selects correct encoder:
-            # - flux.2-dev → Mistral-3 24B
-            # - flux.2-klein-4b/9b → Qwen3 (much smaller)
+            # Get model info for this model
+            model_info = FLUX2_MODEL_INFO.get(self.model_name.lower(), {})
+
+            # Check if Klein model for settings
+            self._is_klein = "klein" in self.model_name.lower()
+            if self._is_klein:
+                # Klein uses 16x downscale (VAE 8x + 2x2 patchify)
+                self._vae_downscale = 16
+                # Klein distilled has fixed params
+                self._guidance_distilled = model_info.get("guidance_distilled", True)
+                defaults = model_info.get("defaults", {})
+                self._klein_defaults = {
+                    "guidance": defaults.get("guidance", 1.0),
+                    "num_steps": defaults.get("num_steps", 4),
+                }
+                self.logger.info(f"Klein model detected: guidance={self._klein_defaults['guidance']}, steps={self._klein_defaults['num_steps']}")
+
+            # Load components - use model-aware loaders
             self._text_encoder = load_text_encoder(
                 self.model_name,
                 device="cpu" if self.offload else self.device
@@ -130,10 +144,11 @@ class Flux2DeforumPipeline:
                 device="cpu" if self.offload else self.device
             )
 
-            # Klein models have VAE at different location - handle specially
-            if "klein" in self.model_name.lower():
-                self._ae = self._load_klein_ae()
+            # Load VAE - Klein uses diffusers format, others use BFL native
+            if self._is_klein:
+                self._ae = self._load_klein_vae()
             else:
+                from flux2.util import load_ae
                 self._ae = load_ae(
                     self.model_name,
                     device="cpu" if self.offload else self.device
@@ -154,14 +169,10 @@ class Flux2DeforumPipeline:
         except Exception as e:
             raise FluxModelError(f"Failed to load models: {e}", model_name=self.model_name) from e
 
-    def _load_klein_ae(self):
-        """Load VAE for Klein models using diffusers with channel adapter.
+    def _load_klein_vae(self):
+        """Load diffusers VAE for Klein models.
 
-        Klein/FLUX.2 uses:
-        - VAE with 32 latent channels
-        - DiT with 128 channels (32 * 2x2 patchify)
-
-        We wrap diffusers VAE to handle 128<->32 channel conversion.
+        Klein uses diffusers format VAE (32ch) with patchify/unpatchify for 128ch DiT.
         """
         from diffusers import AutoencoderKL
 
@@ -171,7 +182,7 @@ class Flux2DeforumPipeline:
         }
         repo_id = repo_map.get(self.model_name.lower(), repo_map["flux.2-klein-4b"])
 
-        self.logger.info(f"Loading Klein VAE from {repo_id}")
+        self.logger.info(f"Loading Klein diffusers VAE from {repo_id}")
 
         vae = AutoencoderKL.from_pretrained(
             repo_id,
@@ -182,13 +193,7 @@ class Flux2DeforumPipeline:
         device = "cpu" if self.offload else self.device
         vae = vae.to(device).eval()
 
-        # Wrap with channel adapter
-        self._klein_vae = vae
-        self._is_klein = True
-        # Klein VAE uses 16x downscale (4 blocks), not 8x like standard FLUX
-        self._vae_downscale = 16
-
-        self.logger.info("Klein VAE loaded successfully (16x downscale)")
+        self.logger.info("Klein VAE loaded (diffusers format, 32ch with patchify)")
         return vae
 
     @property
@@ -215,10 +220,10 @@ class Flux2DeforumPipeline:
         prompts: Union[Dict[int, str], str],
         motion_params: Dict[str, Any],
         num_frames: int = 60,
-        width: int = 1024,
-        height: int = 1024,
-        num_inference_steps: int = 28,
-        guidance_scale: float = 3.5,
+        width: int = 768,
+        height: int = 768,
+        num_inference_steps: Optional[int] = None,
+        guidance_scale: Optional[float] = None,
         strength: Optional[float] = None,
         fps: int = 24,
         output_path: Optional[Union[str, Path]] = None,
@@ -289,6 +294,24 @@ class Flux2DeforumPipeline:
         # Convert single prompt to dict
         if isinstance(prompts, str):
             prompts = {0: prompts}
+
+        # Ensure models loaded to get Klein detection
+        if not self._loaded:
+            self.load_models()
+
+        # Apply Klein defaults if not specified (BFL FIXED params)
+        if getattr(self, '_is_klein', False):
+            defaults = getattr(self, '_klein_defaults', {"guidance": 1.0, "num_steps": 4})
+            if guidance_scale is None:
+                guidance_scale = defaults["guidance"]
+            if num_inference_steps is None:
+                num_inference_steps = defaults["num_steps"]
+            self.logger.info(f"Klein model: guidance={guidance_scale}, steps={num_inference_steps}")
+        else:
+            if guidance_scale is None:
+                guidance_scale = 3.5
+            if num_inference_steps is None:
+                num_inference_steps = 28
 
         # Merge prompts into motion params
         full_params = {**motion_params, "prompts": prompts}
@@ -823,10 +846,12 @@ class Flux2DeforumPipeline:
 
     @torch.no_grad()
     def _decode_latent(self, latent: torch.Tensor) -> Image.Image:
-        """Decode latent to PIL Image using FLUX.2 autoencoder.
+        """Decode latent to PIL Image.
 
-        For Klein (diffusers VAE): unpatchify 128ch -> 32ch, then decode
-        For native flux2: ae.decode handles 128ch directly
+        Klein: diffusers VAE (32ch) with unpatchify from 128ch
+        Others: BFL native ae (128ch direct)
+
+        Matches BFL cli.py pixel conversion: clamp -> (127.5 * (x + 1.0))
         """
         if self.offload:
             self.ae.to(self.device)
@@ -835,26 +860,22 @@ class Flux2DeforumPipeline:
 
         with torch.autocast(device_type=self.device.replace("mps", "cpu"), dtype=torch.bfloat16):
             if getattr(self, '_is_klein', False):
-                # Klein uses diffusers VAE with 32 channels
-                # Unpatchify: 128ch -> 32ch (reverse 2x2 patchify)
+                # Klein: unpatchify 128ch -> 32ch, then diffusers VAE decode
                 latent_32 = self._unpatchify(latent)
-                # NOTE: BFL native autoencoder doesn't use scaling factor
-                # Diffusers VAE expects unscaled latents from DiT
-                # Diffusers VAE decode returns DecoderOutput
-                x = self.ae.decode(latent_32).sample
+                x = self.ae.decode(latent_32).sample.float()
             else:
-                # Native flux2 ae handles 128ch
-                x = self.ae.decode(latent)
+                # BFL native ae handles 128ch directly
+                x = self.ae.decode(latent).float()
 
         if self.offload:
             self.ae.cpu()
             torch.cuda.empty_cache()
 
-        # Convert to PIL
+        # Convert to PIL - exact BFL cli.py method
         x = x.clamp(-1, 1)
-        x = (x + 1) / 2  # [-1, 1] -> [0, 1]
-        x = x[0].permute(1, 2, 0).cpu().float().numpy()
-        x = (x * 255).astype(np.uint8)
+        # BFL uses: (127.5 * (x + 1.0)) which equals (x + 1) / 2 * 255
+        x = x[0].permute(1, 2, 0).cpu().numpy()
+        x = (127.5 * (x + 1.0)).astype(np.uint8)
 
         return Image.fromarray(x)
 
@@ -892,12 +913,14 @@ class Flux2DeforumPipeline:
         image: Image.Image,
         pre_sharpen: float = 0.3
     ) -> torch.Tensor:
-        """Encode PIL Image to 128-channel latent using FLUX.2 autoencoder.
+        """Encode PIL Image to 128-channel latent.
+
+        Klein: diffusers VAE (32ch) with patchify to 128ch
+        Others: BFL native ae (128ch direct)
 
         IMPORTANT: Pre-sharpening before encode is critical for Flux img2img.
-        The expert insight: Flux Flow Matching interprets blur as signal, so
-        if input has interpolation blur, output will be "sharp blur".
-        Pre-sharpening destroys interpolation artifacts before encoding.
+        Flux Flow Matching interprets blur as signal, so pre-sharpening
+        destroys interpolation artifacts before encoding.
 
         Args:
             image: Input PIL image
@@ -906,11 +929,10 @@ class Flux2DeforumPipeline:
         from flux2.sampling import default_prep
 
         # FLUX FIX: Pre-sharpen to destroy interpolation artifacts
-        # This tricks the Flow Matcher into seeing texture instead of blur
         if pre_sharpen > 0:
             image = self._sharpen_image(image, pre_sharpen)
 
-        # Prepare image (resize, crop, normalize)
+        # Prepare image (resize, crop, normalize to [-1, 1])
         img_tensor = default_prep(image, limit_pixels=2024**2)
         if not isinstance(img_tensor, torch.Tensor):
             img_tensor = img_tensor[0]  # Handle list case
@@ -921,15 +943,11 @@ class Flux2DeforumPipeline:
             self.ae.to(self.device)
 
         if getattr(self, '_is_klein', False):
-            # Klein uses diffusers VAE with 32 channels
-            # Use mean not sample() to avoid adding noise
+            # Klein: diffusers VAE encode (32ch) then patchify to 128ch
             latent_32 = self.ae.encode(img_tensor).latent_dist.mean
-            # NOTE: BFL native autoencoder doesn't use scaling factor
-            # DiT expects unscaled latents from VAE
-            # Patchify: 32ch -> 128ch
             latent = self._patchify(latent_32)
         else:
-            # Native flux2 ae returns 128ch directly
+            # BFL native ae returns 128ch directly
             latent = self.ae.encode(img_tensor)
 
         if self.offload:
@@ -942,13 +960,34 @@ class Flux2DeforumPipeline:
     def generate_single_frame(
         self,
         prompt: str,
-        width: int = 1024,
-        height: int = 1024,
-        num_inference_steps: int = 28,
-        guidance_scale: float = 3.5,
+        width: int = 768,
+        height: int = 768,
+        num_inference_steps: Optional[int] = None,
+        guidance_scale: Optional[float] = None,
         seed: Optional[int] = None,
     ) -> Image.Image:
-        """Generate a single image (convenience method)."""
+        """Generate a single image (convenience method).
+
+        For Klein models, uses BFL defaults: guidance=1.0, steps=4 (FIXED).
+        For other models: guidance=3.5, steps=28.
+        """
+        # Ensure models loaded to get Klein detection
+        if not self._loaded:
+            self.load_models()
+
+        # Apply Klein defaults if not specified
+        if getattr(self, '_is_klein', False):
+            defaults = getattr(self, '_klein_defaults', {"guidance": 1.0, "num_steps": 4})
+            if guidance_scale is None:
+                guidance_scale = defaults["guidance"]
+            if num_inference_steps is None:
+                num_inference_steps = defaults["num_steps"]
+        else:
+            if guidance_scale is None:
+                guidance_scale = 3.5
+            if num_inference_steps is None:
+                num_inference_steps = 28
+
         if seed is None:
             seed = torch.randint(0, 2**32, (1,)).item()
 
