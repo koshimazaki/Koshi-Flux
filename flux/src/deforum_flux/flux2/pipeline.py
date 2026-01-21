@@ -31,6 +31,7 @@ from deforum_flux.core import (
     log_memory_usage,
 )
 from deforum_flux.shared import FluxDeforumParameterAdapter, MotionFrame, BaseFluxMotionEngine
+from deforum_flux.shared.noise_coherence import WarpedNoiseManager, NoiseCoherenceConfig
 from deforum_flux.utils import temp_directory, save_frames, encode_video_ffmpeg
 from deforum_flux.feedback import FeedbackProcessor, FeedbackConfig, DetectionResult
 from .motion_engine import Flux2MotionEngine
@@ -95,6 +96,9 @@ class Flux2DeforumPipeline:
 
         # Animation config with anti-burn/blur defaults
         self.animation_config = FLUX2_ANIMATION_CONFIG
+
+        # Noise coherence manager (KEY for temporal consistency)
+        self._noise_manager: Optional[WarpedNoiseManager] = None
 
         # Models (lazy loaded)
         self._model = None
@@ -173,12 +177,20 @@ class Flux2DeforumPipeline:
         """Load diffusers VAE for Klein models.
 
         Klein uses diffusers format VAE (32ch) with patchify/unpatchify for 128ch DiT.
+
+        CRITICAL: Also loads batch norm stats for latent normalization.
+        The BFL native VAE normalizes latents before DiT and inv_normalizes after.
+        Diffusers VAE ignores these, causing dithering artifacts if not applied manually.
         """
         from diffusers import AutoencoderKL
+        from safetensors.torch import load_file
+        from huggingface_hub import hf_hub_download
 
         repo_map = {
             "flux.2-klein-4b": "black-forest-labs/FLUX.2-klein-4B",
             "flux.2-klein-9b": "black-forest-labs/FLUX.2-klein-9B",
+            "flux.2-klein-base-4b": "black-forest-labs/FLUX.2-klein-base-4B",
+            "flux.2-klein-base-9b": "black-forest-labs/FLUX.2-klein-base-9B",
         }
         repo_id = repo_map.get(self.model_name.lower(), repo_map["flux.2-klein-4b"])
 
@@ -189,6 +201,29 @@ class Flux2DeforumPipeline:
             subfolder="vae",
             torch_dtype=torch.bfloat16,
         )
+
+        # Load batch norm stats that diffusers ignores
+        # These are critical for proper latent normalization
+        try:
+            vae_weights_path = hf_hub_download(
+                repo_id=repo_id,
+                filename="vae/diffusion_pytorch_model.safetensors"
+            )
+            weights = load_file(vae_weights_path)
+
+            # Extract batch norm stats (128 channels for patchified latent)
+            self._bn_running_mean = weights["bn.running_mean"].to(torch.float32)
+            self._bn_running_var = weights["bn.running_var"].to(torch.float32)
+            self._bn_eps = 1e-5  # Standard batch norm epsilon
+
+            self.logger.info(
+                f"Loaded Klein batch norm stats: mean_range=[{self._bn_running_mean.min():.3f}, "
+                f"{self._bn_running_mean.max():.3f}], var_mean={self._bn_running_var.mean():.3f}"
+            )
+        except Exception as e:
+            self.logger.warning(f"Could not load batch norm stats: {e}. Using identity normalization.")
+            self._bn_running_mean = None
+            self._bn_running_var = None
 
         device = "cpu" if self.offload else self.device
         vae = vae.to(device).eval()
@@ -236,7 +271,7 @@ class Flux2DeforumPipeline:
         feedback_config: Optional[FeedbackConfig] = None,
         feedback_decay: float = 0.0,
         # Latent mode parameters
-        noise_scale: float = 0.2,
+        noise_scale: float = 1.0,  # Correct rectified flow (was 0.2, caused grid artifacts)
         noise_type: str = "perlin",
         # Shared parameters
         color_coherence: str = "LAB",
@@ -246,6 +281,8 @@ class Flux2DeforumPipeline:
         texture_prompt: Optional[str] = "detailed texture, film grain, sharp focus",
         # Opt-in adaptive corrections (anti-burn/anti-blur)
         correction_config: Optional[AdaptiveCorrectionConfig] = None,
+        # Noise coherence for temporal consistency (KEY FIX for "random frames")
+        noise_coherence: Optional[NoiseCoherenceConfig] = None,
     ) -> str:
         """
         Generate Deforum-style animation using native FLUX.2/Klein.
@@ -276,7 +313,7 @@ class Flux2DeforumPipeline:
             feedback_mode: Enable FeedbackSampler pixel processing (pixel mode)
             feedback_config: FeedbackConfig for pixel processing options
             feedback_decay: Latent momentum 0.0-1.0 (0.0 recommended to prevent burn)
-            noise_scale: Noise blend amount for latent mode (0.2 recommended)
+            noise_scale: Noise blend sigma multiplier (1.0 = correct rectified flow)
             noise_type: "perlin" (smoother) or "gaussian"
             color_coherence: Color matching mode - "LAB", "RGB", "HSV", or None
             sharpen_amount: Anti-blur sharpening 0.0-1.0
@@ -287,6 +324,11 @@ class Flux2DeforumPipeline:
                 - latent_ema: Smooth latent transitions (reduces flickering)
                 - soft_clamp: Prevent extreme pixel values
                 - cadence_skip: Skip denoising on high-motion frames
+            noise_coherence: NoiseCoherenceConfig for temporal consistency:
+                - warp_noise: Warp noise with camera motion (KEY FIX)
+                - warp_blend: Blend ratio for warped vs fresh noise
+                - use_slerp: Spherical interpolation for smooth transitions
+                - slerp_strength: How much to blend toward previous noise
 
         Returns:
             Path to output video file
@@ -359,6 +401,7 @@ class Flux2DeforumPipeline:
                 sharpen_amount=sharpen_amount,
                 texture_prompt=texture_prompt,
                 correction_config=correction_config,
+                noise_coherence=noise_coherence,
             )
 
             # Save frames
@@ -393,12 +436,13 @@ class Flux2DeforumPipeline:
         use_pixel_mode: bool = True,
         feedback_config: Optional[FeedbackConfig] = None,
         feedback_decay: float = 0.0,
-        noise_scale: float = 0.2,
+        noise_scale: float = 1.0,  # Correct rectified flow
         noise_type: str = "perlin",
         color_coherence: str = "LAB",
         sharpen_amount: float = 0.05,
         texture_prompt: Optional[str] = None,
         correction_config: Optional[AdaptiveCorrectionConfig] = None,
+        noise_coherence: Optional[NoiseCoherenceConfig] = None,
     ) -> List[Image.Image]:
         """
         Core generation loop with two modes.
@@ -430,6 +474,17 @@ class Flux2DeforumPipeline:
         # Use default correction config if None (all features disabled)
         if correction_config is None:
             correction_config = AdaptiveCorrectionConfig()
+
+        # Initialize noise coherence manager (KEY for temporal consistency)
+        # Default: enable warped noise to fix "random frame" syndrome
+        if noise_coherence is None:
+            noise_coherence = NoiseCoherenceConfig(
+                warp_noise=True,
+                warp_blend=0.7,  # 70% warped, 30% fresh
+                use_slerp=True,
+                slerp_strength=0.2,
+            )
+        self._noise_manager = WarpedNoiseManager(config=noise_coherence, seed=seed)
 
         for i, motion_frame in enumerate(tqdm(motion_frames, desc="Generating")):
             frame_seed = seed + i
@@ -530,7 +585,7 @@ class Flux2DeforumPipeline:
                         seed=frame_seed,
                     )
                 else:
-                    # LATENT MODE: Traditional approach
+                    # LATENT MODE: Traditional approach with coherent noise
                     image, latent = self._generate_motion_frame(
                         prev_latent=prev_latent,
                         prompt=frame_prompt,
@@ -542,6 +597,7 @@ class Flux2DeforumPipeline:
                         strength=effective_strength,
                         seed=frame_seed,
                         noise_scale=noise_scale,
+                        noise_manager=self._noise_manager,
                     )
 
                     # Apply color coherence in latent mode (post-processing)
@@ -672,9 +728,20 @@ class Flux2DeforumPipeline:
         guidance_scale: float,
         strength: float,
         seed: int,
-        noise_scale: float = 0.2,
+        noise_scale: float = 1.0,  # Default 1.0 for correct rectified flow
+        noise_manager: Optional[WarpedNoiseManager] = None,
     ) -> tuple:
-        """Generate frame with motion applied to previous latent."""
+        """
+        Generate frame with motion applied to previous latent.
+
+        Rectified Flow img2img: The timestep t from get_schedule IS the sigma value.
+        At t=1: pure noise, at t=0: pure image.
+        Blend formula: x_t = t * noise + (1-t) * image
+
+        Note: noise_scale was previously 0.2 which caused insufficient noise,
+        leading to the model not having enough "velocity" to reorganize warped
+        pixels, resulting in grid artifacts.
+        """
         from flux2.sampling import (
             get_schedule, denoise, prc_txt, prc_img
         )
@@ -696,14 +763,27 @@ class Flux2DeforumPipeline:
         latent_h = height // self._vae_downscale
         latent_w = width // self._vae_downscale
 
-        # Get noise for blending
-        generator = torch.Generator(device=self.device).manual_seed(seed)
-        noise = torch.randn(
-            transformed_latent.shape,
-            device=transformed_latent.device,
-            dtype=transformed_latent.dtype,
-            generator=generator
-        )
+        # Get noise for blending - USE COHERENT NOISE (KEY FIX for temporal consistency)
+        # When we warp the latent, we must also warp the noise. Otherwise the model
+        # sees a mismatch between warped content and random noise, causing it to
+        # "reset" and generate random new content.
+        if noise_manager is not None:
+            noise = noise_manager.get_coherent_noise(
+                shape=transformed_latent.shape,
+                motion_params=motion_params,
+                device=transformed_latent.device,
+                dtype=transformed_latent.dtype,
+                frame_seed=seed
+            )
+        else:
+            # Fallback to random noise (old behavior)
+            generator = torch.Generator(device=self.device).manual_seed(seed)
+            noise = torch.randn(
+                transformed_latent.shape,
+                device=transformed_latent.device,
+                dtype=transformed_latent.dtype,
+                generator=generator
+            )
 
         # Process latent to token format
         img_tokens, img_ids = prc_img(transformed_latent[0])
@@ -720,10 +800,11 @@ class Flux2DeforumPipeline:
         noise_tokens, _ = prc_img(noise[0])
         noise_tokens = noise_tokens.unsqueeze(0).to(self.device, dtype=torch.bfloat16)
 
-        # Blend latent with noise at starting timestep
-        # Scale noise amount to prevent blur (lower = smoother animation)
-        t_scaled = t * noise_scale
-        img_tokens = img_tokens * (1 - t_scaled) + noise_tokens * t_scaled
+        # Rectified Flow blend: x_t = t * noise + (1-t) * image
+        # t is the sigma value from get_schedule (mu-shifted for resolution)
+        # Using t directly (noise_scale=1.0) is correct; lower values cause grid artifacts
+        sigma = t * noise_scale
+        img_tokens = (1.0 - sigma) * img_tokens + sigma * noise_tokens
 
         # Encode text (keep on CPU - Mistral 24B too large for GPU)
         txt_tokens = self.text_encoder([prompt])
@@ -774,44 +855,39 @@ class Flux2DeforumPipeline:
         width: int
     ) -> torch.Tensor:
         """
-        Unpack FLUX.2 tokens back to spatial latent format.
-
-        FLUX.2 uses position IDs (t, h, w, l) to track token positions.
-        We need to scatter tokens back to (B, 128, H, W) format.
+        Unpack FLUX.2 tokens back to spatial latent format using BFL's native scatter_ids.
 
         Args:
             tokens: Token tensor (B, seq_len, C)
             ids: Position ID tensor (B, seq_len, 4) with (t, h, w, l)
-            height: Latent height
-            width: Latent width
+            height: Latent height (unused, determined from ids)
+            width: Latent width (unused, determined from ids)
 
         Returns:
             Spatial latent tensor (B, 128, H, W)
         """
+        from flux2.sampling import scatter_ids
+
         batch_size = tokens.shape[0]
-        channels = tokens.shape[-1]
 
-        # Create output tensor
-        latent = torch.zeros(
-            batch_size, channels, height, width,
-            device=tokens.device,
-            dtype=tokens.dtype
-        )
+        # scatter_ids expects lists of (seq, ch) and (seq, 4) tensors
+        tokens_list = [tokens[b] for b in range(batch_size)]
+        ids_list = [ids[b] for b in range(batch_size)]
 
-        # Scatter tokens to spatial positions
-        for b in range(batch_size):
-            for i in range(tokens.shape[1]):
-                # Position IDs: (t, h, w, l) - we use h, w
-                h_idx = ids[b, i, 1].long()
-                w_idx = ids[b, i, 2].long()
+        # BFL's scatter_ids returns list of (T, C, ?, H, W) tensors
+        scattered = scatter_ids(tokens_list, ids_list)
 
-                # Clamp to valid range
-                h_idx = torch.clamp(h_idx, 0, height - 1)
-                w_idx = torch.clamp(w_idx, 0, width - 1)
+        # Stack and squeeze temporal dimensions for single-frame case
+        # Result shape: (T, C, ?, H, W) -> (C, H, W) for each batch item
+        latents = []
+        for s in scattered:
+            # s shape is (T, C, ?, H, W) - for single image T=1, ?=1
+            # Squeeze to (C, H, W)
+            latent = s.squeeze(0).squeeze(1)  # Remove T and extra dim
+            latents.append(latent)
 
-                latent[b, :, h_idx, w_idx] = tokens[b, i]
-
-        return latent
+        # Stack to (B, C, H, W)
+        return torch.stack(latents, dim=0)
 
     @torch.no_grad()
     def _pack_to_tokens(
@@ -851,6 +927,9 @@ class Flux2DeforumPipeline:
         Klein: diffusers VAE (32ch) with unpatchify from 128ch
         Others: BFL native ae (128ch direct)
 
+        CRITICAL: For Klein, applies inv_normalize before decode to fix dithering.
+        BFL's native VAE does: latent * sqrt(var) + mean before decoding.
+
         Matches BFL cli.py pixel conversion: clamp -> (127.5 * (x + 1.0))
         """
         if self.offload:
@@ -860,11 +939,19 @@ class Flux2DeforumPipeline:
 
         with torch.autocast(device_type=self.device.replace("mps", "cpu"), dtype=torch.bfloat16):
             if getattr(self, '_is_klein', False):
+                # Klein: Apply inverse batch norm before unpatchify/decode
+                # This fixes the dithering artifacts from missing normalization
+                if getattr(self, '_bn_running_mean', None) is not None:
+                    # inv_normalize: z * sqrt(var) + mean
+                    bn_mean = self._bn_running_mean.view(1, -1, 1, 1).to(latent.device, dtype=latent.dtype)
+                    bn_std = torch.sqrt(self._bn_running_var + self._bn_eps).view(1, -1, 1, 1).to(latent.device, dtype=latent.dtype)
+                    latent = latent * bn_std + bn_mean
+
                 # Klein: unpatchify 128ch -> 32ch, then diffusers VAE decode
                 latent_32 = self._unpatchify(latent)
                 x = self.ae.decode(latent_32).sample.float()
             else:
-                # BFL native ae handles 128ch directly
+                # BFL native ae handles 128ch directly (includes its own normalization)
                 x = self.ae.decode(latent).float()
 
         if self.offload:
@@ -946,8 +1033,16 @@ class Flux2DeforumPipeline:
             # Klein: diffusers VAE encode (32ch) then patchify to 128ch
             latent_32 = self.ae.encode(img_tensor).latent_dist.mean
             latent = self._patchify(latent_32)
+
+            # Apply batch norm normalization after patchify
+            # This matches what BFL's native VAE does internally
+            # normalize: (z - mean) / sqrt(var)
+            if getattr(self, '_bn_running_mean', None) is not None:
+                bn_mean = self._bn_running_mean.view(1, -1, 1, 1).to(latent.device, dtype=latent.dtype)
+                bn_std = torch.sqrt(self._bn_running_var + self._bn_eps).view(1, -1, 1, 1).to(latent.device, dtype=latent.dtype)
+                latent = (latent - bn_mean) / bn_std
         else:
-            # BFL native ae returns 128ch directly
+            # BFL native ae returns 128ch directly (includes its own normalization)
             latent = self.ae.encode(img_tensor)
 
         if self.offload:

@@ -10,6 +10,11 @@ from .transforms import (
     rotate_transform,
     translate_transform,
 )
+from .noise_coherence import (
+    NoiseCoherenceConfig,
+    WarpedNoiseManager,
+    create_warped_noise_for_animation,
+)
 
 __all__ = [
     "BaseFluxMotionEngine",
@@ -21,4 +26,7 @@ __all__ = [
     "zoom_transform",
     "rotate_transform",
     "translate_transform",
+    "NoiseCoherenceConfig",
+    "WarpedNoiseManager",
+    "create_warped_noise_for_animation",
 ]

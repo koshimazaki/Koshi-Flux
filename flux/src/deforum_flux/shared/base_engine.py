@@ -265,7 +265,8 @@ class BaseFluxMotionEngine(ABC, nn.Module):
         self,
         latent: torch.Tensor,
         motion_params: Dict[str, float],
-        grid_snap: int = 8
+        grid_snap: int = 8,
+        normalize_output: bool = True
     ) -> torch.Tensor:
         """
         Apply 2D geometric transformations (zoom, rotate, translate).
@@ -275,10 +276,15 @@ class BaseFluxMotionEngine(ABC, nn.Module):
         patches (f=8 VAE, 2x2 patchification), so grid_snap=8 keeps latent
         tokens aligned.
 
+        CRITICAL FIX: Bicubic interpolation can cause latent value drift over time
+        (std increases frame-by-frame). We normalize the output to match input
+        statistics to prevent gradual dithering artifacts.
+
         Args:
             latent: Input latent (B, C, H, W)
             motion_params: Motion parameters
             grid_snap: Snap translations to nearest N pixels (8 or 16 for Flux)
+            normalize_output: Re-normalize to match input statistics (prevents drift)
 
         Returns:
             Geometrically transformed latent
@@ -302,7 +308,12 @@ class BaseFluxMotionEngine(ABC, nn.Module):
         # Skip if no transform needed
         if zoom == 1.0 and angle == 0.0 and tx == 0.0 and ty == 0.0:
             return latent
-        
+
+        # Capture input statistics BEFORE transform (for normalization)
+        if normalize_output:
+            input_mean = latent.mean(dim=(2, 3), keepdim=True)
+            input_std = latent.std(dim=(2, 3), keepdim=True) + 1e-6
+
         # Convert angle to radians - use tensor operations on device
         angle_rad = angle * np.pi / 180.0
         cos_angle = np.cos(angle_rad)
@@ -320,13 +331,13 @@ class BaseFluxMotionEngine(ABC, nn.Module):
             [inv_zoom * cos_angle, -inv_zoom * sin_angle, tx / width * 2],
             [inv_zoom * sin_angle,  inv_zoom * cos_angle, ty / height * 2]
         ], device=latent.device, dtype=latent.dtype)
-        
+
         # Expand for batch
         theta = theta.unsqueeze(0).expand(batch_size, -1, -1)
-        
+
         # Create sampling grid
         grid = F.affine_grid(theta, latent.size(), align_corners=False)
-        
+
         # Apply transformation with reflection padding (classic Deforum behavior)
         # Use bicubic for sharper results (bilinear causes blur on zoom)
         transformed = F.grid_sample(
@@ -335,7 +346,15 @@ class BaseFluxMotionEngine(ABC, nn.Module):
             padding_mode='reflection',
             align_corners=False
         )
-        
+
+        # CRITICAL: Re-normalize to match input statistics
+        # Bicubic interpolation causes std drift (increases ~1% per frame)
+        # After 30 frames: 0.96 -> 1.22 (27% increase) -> causes dithering
+        if normalize_output:
+            output_mean = transformed.mean(dim=(2, 3), keepdim=True)
+            output_std = transformed.std(dim=(2, 3), keepdim=True) + 1e-6
+            transformed = (transformed - output_mean) / output_std * input_std + input_mean
+
         return transformed
     
     # =========================================================================
