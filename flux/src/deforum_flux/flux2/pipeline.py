@@ -70,6 +70,7 @@ class Flux2DeforumPipeline:
         device: str = "cuda",
         motion_engine: Optional[BaseFluxMotionEngine] = None,
         offload: bool = False,
+        compile_model: bool = False,
     ):
         """
         Initialize the pipeline.
@@ -79,10 +80,12 @@ class Flux2DeforumPipeline:
             device: Compute device
             motion_engine: Optional custom motion engine (defaults to Flux2MotionEngine)
             offload: Enable CPU offloading for lower VRAM
+            compile_model: Use torch.compile for ~15% speedup (slower first frame)
         """
         self.model_name = model_name
         self.device = device
         self.offload = offload
+        self.compile_model = compile_model
         self.logger = get_logger(__name__)
 
         # Motion engine (defaults to 128-channel FLUX.2)
@@ -161,6 +164,9 @@ class Flux2DeforumPipeline:
             if self.offload:
                 self.logger.info("Models loaded with CPU offload enabled")
 
+            # Apply optimizations
+            self._apply_optimizations()
+
             self._loaded = True
             self.logger.info("All FLUX.2 models loaded successfully")
 
@@ -230,6 +236,34 @@ class Flux2DeforumPipeline:
 
         self.logger.info("Klein VAE loaded (diffusers format, 32ch with patchify)")
         return vae
+
+    def _apply_optimizations(self):
+        """Apply speed and memory optimizations after models are loaded."""
+        optimizations = []
+
+        # VAE optimizations (for Klein diffusers VAE)
+        if self._is_klein and hasattr(self._ae, 'enable_tiling'):
+            self._ae.enable_tiling()
+            optimizations.append("vae_tiling")
+        if self._is_klein and hasattr(self._ae, 'enable_slicing'):
+            self._ae.enable_slicing()
+            optimizations.append("vae_slicing")
+
+        # torch.compile for DiT model (~15% speedup after warmup)
+        if self.compile_model and self._model is not None:
+            try:
+                self._model = torch.compile(
+                    self._model,
+                    mode="reduce-overhead",
+                    fullgraph=False
+                )
+                optimizations.append("torch_compile")
+                self.logger.info("torch.compile enabled (first frame will be slower)")
+            except Exception as e:
+                self.logger.warning(f"torch.compile failed: {e}")
+
+        if optimizations:
+            self.logger.info(f"Optimizations applied: {', '.join(optimizations)}")
 
     @property
     def model(self):
