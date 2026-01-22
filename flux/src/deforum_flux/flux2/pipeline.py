@@ -679,19 +679,27 @@ class Flux2DeforumPipeline:
         img_tokens = img_tokens.unsqueeze(0).to(self.device, dtype=torch.bfloat16)
         img_ids = img_ids.unsqueeze(0).to(self.device)
 
-        # Encode text with Mistral-3 (keep on CPU - too large for GPU)
-        # Mistral 24B = ~48GB, doesn't fit on 32GB GPU
+        # Encode text - Klein uses Qwen3 (~8GB), can fit on GPU
+        # Move to GPU for encoding if offloaded
+        if self.offload:
+            self._text_encoder.to(self.device)
+
         txt_tokens = self.text_encoder([prompt])
         txt_tokens, txt_ids = prc_txt(txt_tokens[0])
         txt_tokens = txt_tokens.unsqueeze(0).to(self.device, dtype=torch.bfloat16)
         txt_ids = txt_ids.unsqueeze(0).to(self.device)
+
+        # Offload text encoder, load DiT
+        if self.offload:
+            self._text_encoder.cpu()
+            torch.cuda.empty_cache()
 
         # Get timesteps
         timesteps = get_schedule(num_inference_steps, img_tokens.shape[1])
 
         # Denoise
         if self.offload:
-            self.model.to(self.device)
+            self._model.to(self.device)
 
         with torch.autocast(device_type=self.device.replace("mps", "cpu"), dtype=torch.bfloat16):
             x_denoised = denoise(
@@ -806,11 +814,19 @@ class Flux2DeforumPipeline:
         sigma = t * noise_scale
         img_tokens = (1.0 - sigma) * img_tokens + sigma * noise_tokens
 
-        # Encode text (keep on CPU - Mistral 24B too large for GPU)
+        # Encode text - move to GPU if offloaded
+        if self.offload:
+            self._text_encoder.to(self.device)
+
         txt_tokens = self.text_encoder([prompt])
         txt_tokens, txt_ids = prc_txt(txt_tokens[0])
         txt_tokens = txt_tokens.unsqueeze(0).to(self.device, dtype=torch.bfloat16)
         txt_ids = txt_ids.unsqueeze(0).to(self.device)
+
+        # Offload text encoder
+        if self.offload:
+            self._text_encoder.cpu()
+            torch.cuda.empty_cache()
 
         # Only denoise from t_start onwards
         remaining_timesteps = timesteps[t_start:]
@@ -821,7 +837,7 @@ class Flux2DeforumPipeline:
 
         # Denoise
         if self.offload:
-            self.model.to(self.device)
+            self._model.to(self.device)
 
         with torch.autocast(device_type=self.device.replace("mps", "cpu"), dtype=torch.bfloat16):
             x_denoised = denoise(
