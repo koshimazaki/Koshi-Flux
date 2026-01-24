@@ -9,7 +9,7 @@ Demonstrates:
 
 from pathlib import Path
 import torch
-from deforum_flux import create_pipeline, FluxVersion, configure_logging
+from koshi_flux import create_pipeline, FluxVersion, configure_logging
 import logging
 
 

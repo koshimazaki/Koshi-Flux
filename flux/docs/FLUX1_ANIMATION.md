@@ -1,11 +1,11 @@
-# FLUX.1 Deforum Animation Pipeline
+# FLUX.1 Koshi Animation Pipeline
 
 Native BFL FLUX.1 animation using 16-channel latent space motion transforms.
 
 ## Quick Start
 
 ```python
-from deforum_flux import create_flux1_pipeline
+from koshi_flux import create_flux1_pipeline
 
 # Schnell (fast, 4 steps)
 pipe = create_flux1_pipeline(device="cuda", offload=True, schnell=True)
@@ -57,7 +57,7 @@ Or manual:
 ```bash
 cd /workspace
 pip install git+https://github.com/black-forest-labs/flux.git
-export PYTHONPATH="/workspace/runpod_flux1_deploy/flux/src:/workspace/runpod_flux1_deploy/Deforum2026/core/src"
+export PYTHONPATH="/workspace/runpod_flux1_deploy/flux/src:/workspace/runpod_flux1_deploy/koshi-flux/core/src"
 export HF_HUB_ENABLE_HF_TRANSFER=0
 ```
 
@@ -92,7 +92,7 @@ export HF_HUB_ENABLE_HF_TRANSFER=0
 
 ## Motion Parameters
 
-Standard Deforum schedule syntax:
+Standard Koshi schedule syntax:
 
 ```python
 motion_params = {
@@ -151,12 +151,12 @@ x = latent * (1-t) + noise * t  # noise_scale=1.0
 
 ### Quick test (10 frames)
 ```bash
-python3 -c "import os,sys;sys.path.insert(0,'/workspace/runpod_flux1_deploy/flux/src');sys.path.insert(0,'/workspace/runpod_flux1_deploy/Deforum2026/core/src');from deforum_flux import create_flux1_pipeline;pipe=create_flux1_pipeline(device='cuda',offload=True,schnell=True);pipe.generate_animation(prompts={0:'cat eating sushi, anime style'},motion_params={'zoom':'0:(1.0),9:(1.05)'},output_path='/workspace/outputs/test.mp4',num_frames=10,width=512,height=512,num_inference_steps=4,guidance_scale=0.0,fps=24,seed=42,strength=0.5,noise_scale=1.0,noise_mode='fixed')"
+python3 -c "import os,sys;sys.path.insert(0,'/workspace/runpod_flux1_deploy/flux/src');sys.path.insert(0,'/workspace/runpod_flux1_deploy/koshi-flux/core/src');from koshi_flux import create_flux1_pipeline;pipe=create_flux1_pipeline(device='cuda',offload=True,schnell=True);pipe.generate_animation(prompts={0:'cat eating sushi, anime style'},motion_params={'zoom':'0:(1.0),9:(1.05)'},output_path='/workspace/outputs/test.mp4',num_frames=10,width=512,height=512,num_inference_steps=4,guidance_scale=0.0,fps=24,seed=42,strength=0.5,noise_scale=1.0,noise_mode='fixed')"
 ```
 
 ### 5-second zoom test
 ```bash
-python3 -c "import os,sys;sys.path.insert(0,'/workspace/runpod_flux1_deploy/flux/src');sys.path.insert(0,'/workspace/runpod_flux1_deploy/Deforum2026/core/src');from deforum_flux import create_flux1_pipeline;pipe=create_flux1_pipeline(device='cuda',offload=True,schnell=True);pipe.generate_animation(prompts={0:'cat eating sushi, anime style'},motion_params={'zoom':'0:(1.0),119:(1.2)'},output_path='/workspace/outputs/5sec_zoom.mp4',num_frames=120,width=512,height=512,num_inference_steps=4,guidance_scale=0.0,fps=24,seed=42,strength=0.5,noise_scale=1.0,noise_mode='fixed')"
+python3 -c "import os,sys;sys.path.insert(0,'/workspace/runpod_flux1_deploy/flux/src');sys.path.insert(0,'/workspace/runpod_flux1_deploy/koshi-flux/core/src');from koshi_flux import create_flux1_pipeline;pipe=create_flux1_pipeline(device='cuda',offload=True,schnell=True);pipe.generate_animation(prompts={0:'cat eating sushi, anime style'},motion_params={'zoom':'0:(1.0),119:(1.2)'},output_path='/workspace/outputs/5sec_zoom.mp4',num_frames=120,width=512,height=512,num_inference_steps=4,guidance_scale=0.0,fps=24,seed=42,strength=0.5,noise_scale=1.0,noise_mode='fixed')"
 ```
 
 ## Files
@@ -166,10 +166,10 @@ runpod_flux1_deploy/
 ├── pipeline.py              # Main pipeline (synced to flux/src)
 ├── test_focused.py          # Comprehensive parameter tests
 ├── flux/
-│   ├── src/deforum_flux/    # Core library
+│   ├── src/koshi_flux/    # Core library
 │   └── scripts/
 │       └── runpod_complete_setup.sh  # One-line setup
-├── Deforum2026/core/        # Shared Deforum code
+├── koshi-flux/core/        # Shared Koshi code
 └── FLUX1_ANIMATION.md       # This file
 ```
 

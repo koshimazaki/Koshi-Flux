@@ -106,8 +106,8 @@ def warp(img: Image.Image, flow: np.ndarray) -> Image.Image:
 
 def get_pipeline(model: str = "flux.2-klein-4b", offload: bool = True, compile: bool = True):
     """Load Klein pipeline."""
-    from deforum_flux.flux2 import Flux2DeforumPipeline
-    return Flux2DeforumPipeline(model_name=model, offload=offload, compile_model=compile)
+    from koshi_flux.flux2 import Flux2Pipeline
+    return Flux2Pipeline(model_name=model, offload=offload, compile_model=compile)
 
 
 def generate(pipe, frame: Image.Image, prompt: str, strength: float, seed: int) -> Image.Image:

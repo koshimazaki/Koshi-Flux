@@ -14,14 +14,14 @@ HAS_MODEL_LOADER = False
 ModelLoader = None
 model_loader = None
 try:
-    from deforum_flux.models import ModelLoader, model_loader
+    from koshi_flux.models import ModelLoader, model_loader
     HAS_MODEL_LOADER = True
 except (ImportError, AttributeError):
     pass
 
 # Try importing exceptions
 try:
-    from deforum.core.exceptions import ModelLoadingError, FluxModelError
+    from koshi.core.exceptions import ModelLoadingError, FluxModelError
     HAS_EXCEPTIONS = True
 except ImportError:
     HAS_EXCEPTIONS = False
@@ -141,7 +141,7 @@ class TestMemoryEstimation:
         """Create fresh ModelLoader instance."""
         return ModelLoader()
 
-    @patch("deforum_flux.models.model_loader.configs")
+    @patch("koshi_flux.models.model_loader.configs")
     def test_estimate_known_model(self, mock_configs, loader):
         """Estimate memory for known model."""
         # Setup mock config
@@ -194,11 +194,11 @@ class TestLoadModelsWithMocks:
         """Create fresh ModelLoader instance."""
         return ModelLoader()
 
-    @patch("deforum_flux.models.model_loader.load_flow_model")
-    @patch("deforum_flux.models.model_loader.load_ae")
-    @patch("deforum_flux.models.model_loader.load_t5")
-    @patch("deforum_flux.models.model_loader.load_clip")
-    @patch("deforum_flux.models.model_loader.configs")
+    @patch("koshi_flux.models.model_loader.load_flow_model")
+    @patch("koshi_flux.models.model_loader.load_ae")
+    @patch("koshi_flux.models.model_loader.load_t5")
+    @patch("koshi_flux.models.model_loader.load_clip")
+    @patch("koshi_flux.models.model_loader.configs")
     def test_load_models_success(
         self, mock_configs, mock_clip, mock_t5, mock_ae, mock_model, loader
     ):
@@ -217,7 +217,7 @@ class TestLoadModelsWithMocks:
         assert "t5" in models
         assert "clip" in models
 
-    @patch("deforum_flux.models.model_loader.configs")
+    @patch("koshi_flux.models.model_loader.configs")
     def test_load_unknown_model_raises(self, mock_configs, loader):
         """Loading unknown model should raise FluxModelError."""
         mock_configs.__contains__ = lambda self, x: False
@@ -226,11 +226,11 @@ class TestLoadModelsWithMocks:
         with pytest.raises(Exception):  # May be FluxModelError or wrapped
             loader.load_models("unknown-model", device="cpu")
 
-    @patch("deforum_flux.models.model_loader.load_flow_model")
-    @patch("deforum_flux.models.model_loader.load_ae")
-    @patch("deforum_flux.models.model_loader.load_t5")
-    @patch("deforum_flux.models.model_loader.load_clip")
-    @patch("deforum_flux.models.model_loader.configs")
+    @patch("koshi_flux.models.model_loader.load_flow_model")
+    @patch("koshi_flux.models.model_loader.load_ae")
+    @patch("koshi_flux.models.model_loader.load_t5")
+    @patch("koshi_flux.models.model_loader.load_clip")
+    @patch("koshi_flux.models.model_loader.configs")
     def test_models_are_cached(
         self, mock_configs, mock_clip, mock_t5, mock_ae, mock_model, loader
     ):
@@ -279,8 +279,8 @@ class TestModelLoaderErrorHandling:
         """Create fresh ModelLoader instance."""
         return ModelLoader()
 
-    @patch("deforum_flux.models.model_loader.load_flow_model")
-    @patch("deforum_flux.models.model_loader.configs")
+    @patch("koshi_flux.models.model_loader.load_flow_model")
+    @patch("koshi_flux.models.model_loader.configs")
     def test_load_failure_raises_model_loading_error(
         self, mock_configs, mock_model, loader
     ):
@@ -301,12 +301,12 @@ class TestTRTFallback:
         """Create fresh ModelLoader instance."""
         return ModelLoader()
 
-    @patch("deforum_flux.models.model_loader.TRT_AVAILABLE", False)
-    @patch("deforum_flux.models.model_loader.load_flow_model")
-    @patch("deforum_flux.models.model_loader.load_ae")
-    @patch("deforum_flux.models.model_loader.load_t5")
-    @patch("deforum_flux.models.model_loader.load_clip")
-    @patch("deforum_flux.models.model_loader.configs")
+    @patch("koshi_flux.models.model_loader.TRT_AVAILABLE", False)
+    @patch("koshi_flux.models.model_loader.load_flow_model")
+    @patch("koshi_flux.models.model_loader.load_ae")
+    @patch("koshi_flux.models.model_loader.load_t5")
+    @patch("koshi_flux.models.model_loader.load_clip")
+    @patch("koshi_flux.models.model_loader.configs")
     def test_trt_fallback_when_unavailable(
         self, mock_configs, mock_clip, mock_t5, mock_ae, mock_model, loader
     ):

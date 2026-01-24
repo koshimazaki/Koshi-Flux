@@ -9,7 +9,7 @@ import numpy as np
 
 # Try to import audio modules - skip tests if not available
 try:
-    from deforum_flux.audio.mapping_config import (
+    from koshi_flux.audio.mapping_config import (
         FeatureMapping,
         MappingConfig,
         CurveType,
@@ -20,12 +20,12 @@ try:
         save_mapping_config,
         create_custom_mapping,
     )
-    from deforum_flux.audio.schedule_generator import (
+    from koshi_flux.audio.schedule_generator import (
         ParseqKeyframe,
         ParseqSchedule,
         ScheduleGenerator,
     )
-    from deforum_flux.audio.extractor import AudioFeatures
+    from koshi_flux.audio.extractor import AudioFeatures
     HAS_AUDIO_MODULE = True
 except ImportError:
     HAS_AUDIO_MODULE = False
@@ -33,7 +33,7 @@ except ImportError:
 
 pytestmark = pytest.mark.skipif(
     not HAS_AUDIO_MODULE,
-    reason="deforum_flux.audio module not available"
+    reason="koshi_flux.audio module not available"
 )
 
 

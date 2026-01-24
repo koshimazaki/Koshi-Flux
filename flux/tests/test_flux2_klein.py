@@ -12,7 +12,7 @@ import torch
 
 # Factory imports
 try:
-    from deforum_flux.pipeline.factory import (
+    from koshi_flux.pipeline.factory import (
         FluxVersion,
         create_motion_engine,
     )
@@ -23,7 +23,7 @@ except ImportError:
 
 # Config imports
 try:
-    from deforum_flux.flux2.config import (
+    from koshi_flux.flux2.config import (
         Flux2Config,
         Flux2AnimationConfig,
         FLUX2_CONFIG,
@@ -35,7 +35,7 @@ except ImportError:
 
 # Motion engine imports
 try:
-    from deforum_flux.flux2.motion_engine import Flux2MotionEngine
+    from koshi_flux.flux2.motion_engine import Flux2MotionEngine
     HAS_MOTION_ENGINE = True
 except ImportError:
     HAS_MOTION_ENGINE = False

@@ -1,5 +1,5 @@
 """
-Integration Tests for FluxDeforumBridge
+Integration Tests for FluxBridge
 
 Tests the bridge class using mock pipelines for CI environments.
 Run with: pytest tests/test_bridge.py -v
@@ -22,9 +22,9 @@ except (ImportError, AttributeError):
 
 # Try to import bridge - may fail due to cascade import errors
 HAS_BRIDGE = False
-FluxDeforumBridge = None
+FluxBridge = None
 try:
-    from deforum_flux.bridge import FluxDeforumBridge
+    from koshi_flux.bridge import FluxBridge
     HAS_BRIDGE = True
 except (ImportError, AttributeError):
     pass
@@ -38,7 +38,7 @@ pytestmark = pytest.mark.skipif(
 
 @dataclass
 class MockConfig:
-    """Mock config matching deforum.config.settings.Config interface."""
+    """Mock config matching koshi.config.settings.Config interface."""
     model_name: str = "flux-dev"
     device: str = "cpu"
     enable_cpu_offload: bool = False
@@ -68,8 +68,8 @@ class MockConfig:
     translation_z: str = "0:(0)"
 
 
-class TestFluxDeforumBridge:
-    """Tests for FluxDeforumBridge main class."""
+class TestFluxBridge:
+    """Tests for FluxBridge main class."""
 
     @pytest.fixture
     def config(self):
@@ -79,11 +79,11 @@ class TestFluxDeforumBridge:
     @pytest.fixture
     def bridge(self, config):
         """Create bridge in mock mode."""
-        return FluxDeforumBridge(config, mock_mode=True)
+        return FluxBridge(config, mock_mode=True)
 
     def test_initialization(self, config):
         """Test bridge initialization."""
-        bridge = FluxDeforumBridge(config, mock_mode=True)
+        bridge = FluxBridge(config, mock_mode=True)
 
         assert bridge.config is not None
         assert bridge.mock_mode is True
@@ -92,7 +92,7 @@ class TestFluxDeforumBridge:
     def test_mock_mode_requires_allow_mocks(self):
         """Mock mode only activates if config allows it."""
         config = MockConfig(allow_mocks=False)
-        bridge = FluxDeforumBridge(config, mock_mode=True)
+        bridge = FluxBridge(config, mock_mode=True)
 
         # mock_mode should be False because allow_mocks=False
         assert bridge.mock_mode is False
@@ -163,7 +163,7 @@ class TestMockModels:
     def bridge(self):
         """Create bridge in mock mode."""
         config = MockConfig()
-        return FluxDeforumBridge(config, mock_mode=True)
+        return FluxBridge(config, mock_mode=True)
 
     def test_mock_flux_model_callable(self, bridge):
         """Mock Flux model should be callable."""
@@ -213,7 +213,7 @@ class TestMotionSchedule:
     def bridge(self):
         """Create bridge in mock mode."""
         config = MockConfig()
-        return FluxDeforumBridge(config, mock_mode=True)
+        return FluxBridge(config, mock_mode=True)
 
     def test_create_zoom_schedule(self, bridge):
         """Create zoom-only motion schedule."""
@@ -269,7 +269,7 @@ class TestBridgeValidation:
 
     def test_production_validation_with_mocks_fails(self, config):
         """Production validation should fail when using mocks."""
-        bridge = FluxDeforumBridge(config, mock_mode=True)
+        bridge = FluxBridge(config, mock_mode=True)
         validation = bridge.validate_production_ready()
 
         assert validation["production_ready"] is False
@@ -277,7 +277,7 @@ class TestBridgeValidation:
 
     def test_production_validation_returns_dict(self, config):
         """Production validation should return complete dict."""
-        bridge = FluxDeforumBridge(config, mock_mode=True)
+        bridge = FluxBridge(config, mock_mode=True)
         validation = bridge.validate_production_ready()
 
         assert isinstance(validation, dict)
@@ -295,21 +295,21 @@ class TestBridgeConfig:
     def test_model_name_preserved(self):
         """Model name should be preserved from config."""
         config = MockConfig(model_name="flux-schnell")
-        bridge = FluxDeforumBridge(config, mock_mode=True)
+        bridge = FluxBridge(config, mock_mode=True)
 
         assert bridge.config.model_name == "flux-schnell"
 
     def test_device_preserved(self):
         """Device should be preserved from config."""
         config = MockConfig(device="cpu")
-        bridge = FluxDeforumBridge(config, mock_mode=True)
+        bridge = FluxBridge(config, mock_mode=True)
 
         assert bridge.config.device == "cpu"
 
     def test_motion_mode_preserved(self):
         """Motion mode should be preserved from config."""
         config = MockConfig(motion_mode="hybrid")
-        bridge = FluxDeforumBridge(config, mock_mode=True)
+        bridge = FluxBridge(config, mock_mode=True)
 
         assert bridge.config.motion_mode == "hybrid"
 
@@ -324,7 +324,7 @@ class TestBridgeEdgeCases:
 
     def test_empty_motion_schedule(self, config):
         """Handle empty motion schedule."""
-        bridge = FluxDeforumBridge(config, mock_mode=True)
+        bridge = FluxBridge(config, mock_mode=True)
         schedule = bridge.create_simple_motion_schedule(
             max_frames=10,
             zoom_per_frame=1.0,
@@ -336,7 +336,7 @@ class TestBridgeEdgeCases:
 
     def test_single_frame_schedule(self, config):
         """Handle single frame motion schedule."""
-        bridge = FluxDeforumBridge(config, mock_mode=True)
+        bridge = FluxBridge(config, mock_mode=True)
         schedule = bridge.create_simple_motion_schedule(
             max_frames=1,
             zoom_per_frame=1.02,
@@ -347,7 +347,7 @@ class TestBridgeEdgeCases:
 
     def test_large_frame_count(self, config):
         """Handle large frame count in schedule."""
-        bridge = FluxDeforumBridge(config, mock_mode=True)
+        bridge = FluxBridge(config, mock_mode=True)
         schedule = bridge.create_simple_motion_schedule(
             max_frames=1000,
             zoom_per_frame=1.001,
@@ -366,8 +366,8 @@ class TestBridgeLifecycle:
         config1 = MockConfig(model_name="flux-dev")
         config2 = MockConfig(model_name="flux-schnell")
 
-        bridge1 = FluxDeforumBridge(config1, mock_mode=True)
-        bridge2 = FluxDeforumBridge(config2, mock_mode=True)
+        bridge1 = FluxBridge(config1, mock_mode=True)
+        bridge2 = FluxBridge(config2, mock_mode=True)
 
         assert bridge1.config.model_name == "flux-dev"
         assert bridge2.config.model_name == "flux-schnell"
@@ -378,7 +378,7 @@ class TestBridgeLifecycle:
     def test_cleanup_idempotent(self):
         """Cleanup should be idempotent."""
         config = MockConfig()
-        bridge = FluxDeforumBridge(config, mock_mode=True)
+        bridge = FluxBridge(config, mock_mode=True)
 
         # Multiple cleanups should not raise
         bridge.cleanup()
@@ -393,7 +393,7 @@ class TestMockMotionEngine:
     def bridge(self):
         """Create bridge in mock mode."""
         config = MockConfig()
-        return FluxDeforumBridge(config, mock_mode=True)
+        return FluxBridge(config, mock_mode=True)
 
     def test_motion_engine_has_device(self, bridge):
         """Motion engine should have device attribute."""
@@ -414,7 +414,7 @@ class TestMockParameterEngine:
     def bridge(self):
         """Create bridge in mock mode."""
         config = MockConfig()
-        return FluxDeforumBridge(config, mock_mode=True)
+        return FluxBridge(config, mock_mode=True)
 
     def test_parameter_engine_validate(self, bridge):
         """Parameter engine should validate parameters."""

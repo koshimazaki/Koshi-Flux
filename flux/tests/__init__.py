@@ -1,1 +1,1 @@
-"""Tests for FLUX Deforum Pipeline."""
+"""Tests for Koshi FLUX Pipeline."""

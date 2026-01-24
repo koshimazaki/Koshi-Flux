@@ -1,1 +1,1 @@
-"""API tests for deforum_flux."""
+"""API tests for koshi_flux."""

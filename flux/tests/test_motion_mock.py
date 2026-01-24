@@ -15,7 +15,7 @@ import numpy as np
 
 # Try to import motion engines - skip tests if not available
 try:
-    from deforum_flux.animation.motion_engine import Flux16ChannelMotionEngine
+    from koshi_flux.animation.motion_engine import Flux16ChannelMotionEngine
     HAS_MOTION_ENGINE = True
 except ImportError:
     HAS_MOTION_ENGINE = False
@@ -166,14 +166,14 @@ class TestFlux1MotionEngine:
     def test_wrong_channels_raises(self, engine):
         """Wrong channel count should raise error."""
         wrong_latent = torch.randn(1, 4, 64, 64)  # 4 channels instead of 16
-        from deforum.core.exceptions import TensorProcessingError
+        from koshi.core.exceptions import TensorProcessingError
         with pytest.raises(TensorProcessingError):
             engine.validate_latent(wrong_latent)
 
     def test_wrong_dims_raises(self, engine):
         """Wrong dimensionality should raise error."""
         wrong_dims = torch.randn(16, 64, 64)  # 3D instead of 4D
-        from deforum.core.exceptions import TensorProcessingError
+        from koshi.core.exceptions import TensorProcessingError
         with pytest.raises(TensorProcessingError):
             engine.validate_latent(wrong_dims)
 

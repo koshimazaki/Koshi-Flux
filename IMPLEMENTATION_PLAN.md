@@ -1,8 +1,8 @@
-# Implementation Plan: FLUX Deforum Alignment
+# Implementation Plan: FLUX Koshi Alignment
 
 ## Overview
 
-This plan outlines the steps to align the Deforum2026 codebase with original Deforum concepts while optimizing for FLUX infrastructure (1.x, 2.x, Klein).
+This plan outlines the steps to align the koshi-flux codebase with original Koshi concepts while optimizing for FLUX infrastructure (1.x, 2.x, Klein).
 
 ---
 
@@ -12,9 +12,9 @@ This plan outlines the steps to align the Deforum2026 codebase with original Def
 
 **Priority:** High
 **Files to Modify:**
-- `flux/src/deforum_flux/shared/depth.py` (new)
-- `flux/src/deforum_flux/flux1/pipeline.py`
-- `flux/src/deforum_flux/flux2/pipeline.py`
+- `flux/src/koshi_flux/shared/depth.py` (new)
+- `flux/src/koshi_flux/flux1/pipeline.py`
+- `flux/src/koshi_flux/flux2/pipeline.py`
 
 **Implementation:**
 ```python
@@ -57,7 +57,7 @@ if depth_estimator and motion_frame.translation_z != 0:
 
 **Priority:** Medium
 **Files to Modify:**
-- `flux/src/deforum_flux/flux2/config.py`
+- `flux/src/koshi_flux/flux2/config.py`
 - `flux/tests/test_channel_semantics.py` (new)
 
 **Approach:**
@@ -87,8 +87,8 @@ def test_channel_response():
 
 **Priority:** High
 **Files to Modify:**
-- `flux/src/deforum_flux/flux2/config.py`
-- `flux/src/deforum_flux/flux1/config.py` (create if missing)
+- `flux/src/koshi_flux/flux2/config.py`
+- `flux/src/koshi_flux/flux1/config.py` (create if missing)
 
 **Changes:**
 ```python
@@ -112,13 +112,13 @@ class Flux1AnimationConfig:
 
 **Priority:** High
 **Files to Create:**
-- `flux/src/deforum_flux/simple_api.py`
+- `flux/src/koshi_flux/simple_api.py`
 
 **Goal:** Match XLabs-style simplicity for basic use cases.
 
 ```python
 # simple_api.py
-class DeforumFlux:
+class KoshiFlux:
     """Simplified API matching XLabs deforum-x-flux style."""
 
     def __init__(
@@ -174,7 +174,7 @@ class DeforumFlux:
 
 **Priority:** Medium
 **Files to Create:**
-- `flux/src/deforum_flux/presets.py`
+- `flux/src/koshi_flux/presets.py`
 
 ```python
 # presets.py
@@ -245,7 +245,7 @@ PRESETS = {
 
 **Priority:** Medium
 **Files to Create:**
-- `flux/src/deforum_flux/video_input.py`
+- `flux/src/koshi_flux/video_input.py`
 
 **Implementation:**
 ```python
@@ -317,7 +317,7 @@ if weight > 0:
 
 **Priority:** Low
 **Files to Create:**
-- `flux/src/deforum_flux/ransac.py`
+- `flux/src/koshi_flux/ransac.py`
 
 **Note:** RANSAC mode is less common and complex. Consider lower priority unless specifically requested.
 
@@ -329,12 +329,12 @@ if weight > 0:
 
 **Priority:** High
 **Files to Modify:**
-- `flux/src/deforum_flux/pipeline/factory.py`
-- `flux/src/deforum_flux/flux2/pipeline.py`
+- `flux/src/koshi_flux/pipeline/factory.py`
+- `flux/src/koshi_flux/flux2/pipeline.py`
 
 **Implementation:**
 ```python
-class KleinPreviewPipeline(Flux2DeforumPipeline):
+class KleinPreviewPipeline(Flux2KoshiPipeline):
     """Optimized pipeline for real-time Klein preview."""
 
     def __init__(self, size: str = "4b", **kwargs):
@@ -370,7 +370,7 @@ class KleinPreviewPipeline(Flux2DeforumPipeline):
 
 **Priority:** Medium
 **Files to Modify:**
-- `flux/src/deforum_flux/flux2/pipeline.py`
+- `flux/src/koshi_flux/flux2/pipeline.py`
 
 **Changes:**
 ```python
@@ -408,7 +408,7 @@ if self.is_klein:
 - `docs/API_REFERENCE.md`
 
 **Contents:**
-1. Simple API (`DeforumFlux`)
+1. Simple API (`KoshiFlux`)
 2. Advanced API (`create_pipeline`)
 3. Configuration objects
 4. Preset descriptions
@@ -466,15 +466,15 @@ pytest flux/tests/ -v
 pytest flux/tests/test_flux2_klein.py -v
 
 # Run with coverage
-pytest flux/tests/ --cov=deforum_flux --cov-report=html
+pytest flux/tests/ --cov=koshi_flux --cov-report=html
 ```
 
 ---
 
 ## Success Metrics
 
-1. **Compatibility:** All original Deforum schedule formats parse correctly
+1. **Compatibility:** All original Koshi schedule formats parse correctly
 2. **Quality:** No visible burning/blurring after 100+ frames
 3. **Performance:** Klein can generate 60-frame animation in <2 minutes
 4. **Usability:** New users can create first animation with <10 lines of code
-5. **Documentation:** Clear migration path from SD Deforum documented
+5. **Documentation:** Clear migration path from SD Koshi documented

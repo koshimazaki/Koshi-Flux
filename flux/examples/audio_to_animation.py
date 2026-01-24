@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Audio-Driven Animation Example for FLUX Deforum
+Audio-Driven Animation Example for Koshi FLUX
 
 This example demonstrates the complete workflow:
 1. Extract audio features from a music file
@@ -41,7 +41,7 @@ def main():
 
     # Try to import audio module
     try:
-        from deforum_flux.audio import (
+        from koshi_flux.audio import (
             AudioFeatureExtractor,
             ScheduleGenerator,
             DEFAULT_MAPPINGS,

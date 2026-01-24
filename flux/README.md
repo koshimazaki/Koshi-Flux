@@ -1,16 +1,16 @@
-# FLUX Deforum
+# FLUX Koshi
 
 **Motion-aware video generation for Black Forest Labs' FLUX models**
 
 > 🎯 **Status**: Production-ready core | BFL Application Portfolio Project
 
-Brings classic Deforum animation capabilities to FLUX.1 and FLUX.2, operating directly in FLUX's latent space for temporally coherent video generation.
+Brings classic Koshi animation capabilities to FLUX.1 and FLUX.2, operating directly in FLUX's latent space for temporally coherent video generation.
 
 ## Highlights
 
 - ✅ **Complete Generation Pipeline** - Full text→latent→motion→video workflow
 - ✅ **Version-Agnostic Design** - Same API for FLUX.1 (16ch) and FLUX.2 (128ch)
-- ✅ **Classic Deforum Parameters** - Keyframe schedules like `"0:(1.0), 60:(1.05)"`
+- ✅ **Classic Koshi Parameters** - Keyframe schedules like `"0:(1.0), 60:(1.05)"`
 - ✅ **Comprehensive Tests** - Motion engine validation suite
 - ✅ **Production Ready** - Proper error handling, logging, and memory management
 
@@ -18,7 +18,7 @@ Brings classic Deforum animation capabilities to FLUX.1 and FLUX.2, operating di
 
 - **Version-Agnostic Design**: Same API works with FLUX.1 (16 channels) and FLUX.2 (128 channels)
 - **Latent Space Motion**: Zoom, rotate, translate, and depth transforms applied directly in latent space
-- **Deforum Parameter Compatibility**: Parse classic Deforum-style keyframe schedules
+- **Koshi Parameter Compatibility**: Parse classic Koshi-style keyframe schedules
 - **Keyframed Prompts**: Scene transitions via prompt keyframing
 - **Memory Optimized**: CPU offloading options for consumer GPUs
 - **Production Ready**: Comprehensive error handling, logging, and security
@@ -47,7 +47,7 @@ pip install -e .
 ## Quick Start
 
 ```python
-from deforum_flux import create_pipeline, FluxVersion
+from koshi_flux import create_pipeline, FluxVersion
 
 # Create pipeline for FLUX.1
 pipe = create_pipeline(
@@ -82,7 +82,7 @@ FLUX.1 (16 channels)     FLUX.2 (128 channels)
                    │
          BaseFluxMotionEngine
                    │
-         FluxDeforumPipeline
+         FluxKoshiPipeline
                    │
               Same API
 ```
@@ -170,7 +170,7 @@ pipe = create_pipeline(
 
 ### generate_animation()
 
-Generate Deforum-style animation.
+Generate Koshi-style animation.
 
 ```python
 video_path = pipe.generate_animation(
@@ -181,7 +181,7 @@ video_path = pipe.generate_animation(
         60: "scene at sunset",
     },
     
-    # Motion: Deforum-style schedules or constants
+    # Motion: Koshi-style schedules or constants
     motion_params={
         "zoom": "0:(1.0), 60:(1.1)",
         "angle": "0:(0), 30:(10), 60:(0)",
@@ -219,7 +219,7 @@ video_path = pipe.generate_animation(
 
 ### Schedule Format
 
-Deforum-style keyframe schedules:
+Koshi-style keyframe schedules:
 
 ```python
 # Format: "frame:(value), frame:(value), ..."
@@ -234,7 +234,7 @@ Deforum-style keyframe schedules:
 ### Basic Zoom Animation
 
 ```python
-from deforum_flux import create_pipeline, FluxVersion
+from koshi_flux import create_pipeline, FluxVersion
 
 pipe = create_pipeline(FluxVersion.FLUX_1_DEV)
 
@@ -267,7 +267,7 @@ pipe.generate_animation(
 ### Testing Motion Engine Only
 
 ```python
-from deforum_flux.motion import Flux1MotionEngine
+from koshi_flux.motion import Flux1MotionEngine
 import torch
 
 # Test without loading full model
@@ -328,9 +328,9 @@ The pipeline now includes **FeedbackSampler-style processing** for improved temp
 ### Enable FeedbackSampler Mode
 
 ```python
-from deforum_flux import Flux1DeforumPipeline, FeedbackConfig
+from koshi_flux import Flux1KoshiPipeline, FeedbackConfig
 
-pipe = Flux1DeforumPipeline(model_name="flux-schnell", offload=True)
+pipe = Flux1KoshiPipeline(model_name="flux-schnell", offload=True)
 
 video = pipe.generate_animation(
     prompts={0: "infinite fractal tunnel, cosmic energy"},
@@ -527,7 +527,7 @@ mypy src/
 
 ```
 deforum-flux/
-├── src/deforum_flux/
+├── src/koshi_flux/
 │   ├── __init__.py           # Package exports
 │   ├── core/                  # Exceptions, logging
 │   ├── motion/                # Motion engines
@@ -537,7 +537,7 @@ deforum-flux/
 │   │   └── transforms.py     # Geometric transforms
 │   ├── pipeline/              # Main pipeline
 │   │   ├── factory.py        # create_pipeline()
-│   │   └── flux_deforum.py   # FluxDeforumPipeline
+│   │   └── flux_deforum.py   # FluxKoshiPipeline
 │   ├── adapters/              # Parameter conversion
 │   │   └── parameter_adapter.py
 │   └── utils/                 # Tensor/file utilities
@@ -553,7 +553,7 @@ MIT License - See [LICENSE](LICENSE) for details.
 ## Credits
 
 - [Black Forest Labs](https://blackforestlabs.ai/) - FLUX models
-- [Deforum](https://deforum.art/) - Original animation concepts
+- [Koshi](https://deforum.art/) - Original animation concepts
 - [Hugging Face Diffusers](https://github.com/huggingface/diffusers) - Pipeline infrastructure
 
 ---

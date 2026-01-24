@@ -1,6 +1,6 @@
-# Audio Feature Extraction for Deforum
+# Audio Feature Extraction for Koshi
 
-Generate animation schedules from audio files for use with Deforum and Parseq.
+Generate animation schedules from audio files for use with Koshi and Parseq.
 
 ## Quick Start
 
@@ -9,7 +9,7 @@ Generate animation schedules from audio files for use with Deforum and Parseq.
 pip install librosa audioread soundfile
 
 # Generate schedule from audio
-python -m deforum_flux.audio music.mp3 -o schedule.json -m bass_pulse
+python -m koshi_flux.audio music.mp3 -o schedule.json -m bass_pulse
 ```
 
 ## Features Extracted
@@ -43,7 +43,7 @@ python -m deforum_flux.audio music.mp3 -o schedule.json -m bass_pulse
 ## Python API
 
 ```python
-from deforum_flux.audio import (
+from koshi_flux.audio import (
     AudioFeatureExtractor,
     ScheduleGenerator,
     DEFAULT_MAPPINGS,
@@ -69,7 +69,7 @@ schedule = generator.generate(
 # 3. Save for Parseq
 schedule.save("schedule.json")
 
-# 4. Or get Deforum keyframe strings
+# 4. Or get Koshi keyframe strings
 deforum_params = schedule.to_deforum_strings()
 # {"zoom": "0:(1.0), 12:(1.05), ...", "angle": "0:(0), ..."}
 ```
@@ -77,7 +77,7 @@ deforum_params = schedule.to_deforum_strings()
 ## Custom Mappings
 
 ```python
-from deforum_flux.audio import MappingConfig, FeatureMapping, CurveType
+from koshi_flux.audio import MappingConfig, FeatureMapping, CurveType
 
 config = MappingConfig(
     name="My Custom",
@@ -109,26 +109,26 @@ schedule = generator.generate(features, mapping=config)
 
 ```bash
 # Basic usage
-python -m deforum_flux.audio music.mp3 -o schedule.json
+python -m koshi_flux.audio music.mp3 -o schedule.json
 
 # Different preset
-python -m deforum_flux.audio music.mp3 -m spectrum -o schedule.json
+python -m koshi_flux.audio music.mp3 -m spectrum -o schedule.json
 
 # Custom settings
-python -m deforum_flux.audio music.mp3 \
+python -m koshi_flux.audio music.mp3 \
     --fps 30 \
     --duration 120 \
     --keyframe-interval 2 \
     -o schedule.json
 
 # List all presets
-python -m deforum_flux.audio --list-presets
+python -m koshi_flux.audio --list-presets
 
-# Show Deforum strings
-python -m deforum_flux.audio music.mp3 --format deforum
+# Show Koshi strings
+python -m koshi_flux.audio music.mp3 --format deforum
 
 # Save extracted features for reuse
-python -m deforum_flux.audio music.mp3 --save-features features.json
+python -m koshi_flux.audio music.mp3 --save-features features.json
 ```
 
 ## Output Formats
@@ -150,7 +150,7 @@ python -m deforum_flux.audio music.mp3 --save-features features.json
 }
 ```
 
-### Deforum Strings
+### Koshi Strings
 ```
 zoom: 0:(1.0), 1:(1.02), 2:(1.05), ...
 angle: 0:(0), 1:(0.5), 2:(1.2), ...
@@ -177,7 +177,7 @@ Run tests to validate installation:
 ./scripts/test_audio_runpod.sh
 
 # Quick import test
-python -c "from deforum_flux.audio import AudioFeatureExtractor; print('OK')"
+python -c "from koshi_flux.audio import AudioFeatureExtractor; print('OK')"
 ```
 
 ## Troubleshooting

@@ -83,7 +83,7 @@ LTX-2 has native temporal attention and audio-video cross-attention. It was desi
 
 ## Recommended Approach
 
-For FLUX.2 Deforum animation, the safest approach is:
+For FLUX.2 Koshi animation, the safest approach is:
 
 1. **Generate first frame** from pure noise
 2. **For each subsequent frame**:
@@ -91,16 +91,16 @@ For FLUX.2 Deforum animation, the safest approach is:
    - Apply motion with Lanczos interpolation
    - Use as **reference/conditioning** (not as starting latent)
    - Generate new frame with high guidance toward reference
-3. **Accept lower temporal coherence** vs SD1.5/SDXL Deforum
+3. **Accept lower temporal coherence** vs SD1.5/SDXL Koshi
 
 Or switch to **LTX-2** for proper video generation with audio reactivity.
 
 ## Files Modified
-- `flux/src/deforum_flux/flux2/pipeline.py` - Added pixel-space motion, tested various approaches
-- `flux/src/deforum_flux/shared/base_engine.py` - Tested interpolation modes
+- `flux/src/koshi_flux/flux2/pipeline.py` - Added pixel-space motion, tested various approaches
+- `flux/src/koshi_flux/shared/base_engine.py` - Tested interpolation modes
 
 ## Key Insight
-> "Deforum-style animation (warp → blend noise → partial denoise) is fundamentally incompatible with FLUX's RoPE architecture. The model expects position embeddings to match pixel content - warping breaks this invariant."
+> "Koshi-style animation (warp → blend noise → partial denoise) is fundamentally incompatible with FLUX's RoPE architecture. The model expects position embeddings to match pixel content - warping breaks this invariant."
 
 ---
 *Session: January 2026*

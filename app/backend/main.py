@@ -1,5 +1,5 @@
 """
-Deforum App Backend - Unified API for FLUX and LTX Video Generation
+Koshi App Backend - Unified API for FLUX and LTX Video Generation
 
 Provides a single API that abstracts model differences, allowing the frontend
 to request video generation without knowing which model is being used.
@@ -15,7 +15,7 @@ import uuid
 import asyncio
 
 app = FastAPI(
-    title="Deforum Video Generation API",
+    title="Koshi Video Generation API",
     description="Unified API for FLUX and LTX video generation",
     version="0.1.0",
 )
@@ -44,7 +44,7 @@ class GenerationRequest(BaseModel):
     seed: Optional[int] = None
 
     # Model-specific params
-    motion_params: Optional[Dict[str, str]] = None  # FLUX Deforum
+    motion_params: Optional[Dict[str, str]] = None  # Koshi FLUX
     strength: float = 0.1
 
     # FeedbackSampler settings
@@ -67,7 +67,7 @@ async def root():
     """API health check."""
     return {
         "status": "ok",
-        "service": "Deforum Video Generation",
+        "service": "Koshi Video Generation",
         "models": ["flux-schnell", "flux-dev", "ltx"],
     }
 
@@ -183,7 +183,7 @@ async def process_generation(job_id: str, request: GenerationRequest):
 
 
 async def generate_flux(job_id: str, request: GenerationRequest) -> Path:
-    """Generate video using FLUX Deforum."""
+    """Generate video using Koshi FLUX."""
     from models.flux_adapter import FluxAdapter
 
     adapter = FluxAdapter(model_name=request.model)

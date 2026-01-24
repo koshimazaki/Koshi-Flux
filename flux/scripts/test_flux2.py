@@ -46,11 +46,11 @@ def test_imports():
         return False
 
     try:
-        from deforum_flux.flux2 import Flux2DeforumPipeline, Flux2MotionEngine
-        from deforum_flux import create_flux2_pipeline
-        logger.info("  deforum_flux: OK")
+        from koshi_flux.flux2 import Flux2Pipeline, Flux2MotionEngine
+        from koshi_flux import create_flux2_pipeline
+        logger.info("  koshi_flux: OK")
     except ImportError as e:
-        logger.error(f"  deforum_flux: FAILED - {e}")
+        logger.error(f"  koshi_flux: FAILED - {e}")
         return False
 
     logger.info("All imports OK!\n")
@@ -63,9 +63,9 @@ def test_single_image(prompt: str = "a mystical forest with glowing mushrooms"):
     logger.info("Single Image Generation Test")
     logger.info("=" * 50)
 
-    from deforum_flux.flux2 import Flux2DeforumPipeline
+    from koshi_flux.flux2 import Flux2Pipeline
 
-    pipe = Flux2DeforumPipeline(
+    pipe = Flux2Pipeline(
         model_name="flux.2-dev",
         device="cuda",
         offload=True,
@@ -97,7 +97,7 @@ def test_animation(num_frames: int = 24):
     logger.info("Animation Generation Test")
     logger.info("=" * 50)
 
-    from deforum_flux import create_flux2_pipeline
+    from koshi_flux import create_flux2_pipeline
 
     pipe = create_flux2_pipeline(device="cuda", offload=True)
 

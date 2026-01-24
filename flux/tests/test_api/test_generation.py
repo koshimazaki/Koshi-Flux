@@ -6,7 +6,7 @@ from unittest.mock import patch, MagicMock
 # Try to import API module - skip tests if not available
 try:
     from fastapi.testclient import TestClient
-    from deforum_flux.api import app
+    from koshi_flux.api import app
     HAS_API = True
 except (ImportError, AttributeError):
     HAS_API = False
@@ -16,7 +16,7 @@ except (ImportError, AttributeError):
 
 pytestmark = pytest.mark.skipif(
     not HAS_API,
-    reason="deforum_flux.api module not available or has import errors"
+    reason="koshi_flux.api module not available or has import errors"
 )
 
 

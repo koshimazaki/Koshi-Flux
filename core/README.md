@@ -1,4 +1,4 @@
-# Deforum
+# Koshi
 
 AI generation protocol and CLI tool.
 

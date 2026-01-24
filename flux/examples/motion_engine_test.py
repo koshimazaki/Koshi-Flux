@@ -7,7 +7,7 @@ Useful for development and debugging motion behavior.
 
 import torch
 import numpy as np
-from deforum_flux.motion import Flux1MotionEngine, Flux2MotionEngine
+from koshi_flux.motion import Flux1MotionEngine, Flux2MotionEngine
 
 
 def test_flux1_motion():
@@ -161,7 +161,7 @@ def test_sequence_processing():
 
 def main():
     """Run all motion engine tests."""
-    print("FLUX Deforum Motion Engine Tests")
+    print("Koshi FLUX Motion Engine Tests")
     print("================================\n")
     
     tests = [

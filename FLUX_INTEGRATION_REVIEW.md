@@ -1,14 +1,14 @@
-# FLUX Integration Review: Deforum2026 vs Original Deforum Ecosystem
+# FLUX Integration Review: koshi-flux vs Original Koshi Ecosystem
 
 ## Executive Summary
 
-This document reviews the integration approaches for FLUX models (1.x, 2.x, Klein) in the Deforum2026 codebase, comparing against the original Deforum implementation and community forks. The goal is to ensure compatibility with Deforum's core concepts while adapting to FLUX's unique architecture.
+This document reviews the integration approaches for FLUX models (1.x, 2.x, Klein) in the koshi-flux codebase, comparing against the original Koshi implementation and community forks. The goal is to ensure compatibility with Koshi's core concepts while adapting to FLUX's unique architecture.
 
 ---
 
 ## 1. Architecture Comparison
 
-### 1.1 Original Deforum (Stable Diffusion)
+### 1.1 Original Koshi (Stable Diffusion)
 
 **Repository**: [deforum/deforum-stable-diffusion](https://github.com/deforum/deforum-stable-diffusion) (no longer maintained)
 
@@ -26,7 +26,7 @@ This document reviews the integration approaches for FLUX models (1.x, 2.x, Klei
 Prompt → CLIP → Noise → Denoise (UNet) → Decode → Motion Transform → Re-encode → Loop
 ```
 
-**Key Deforum Concepts:**
+**Key Koshi Concepts:**
 1. **Keyframe Schedules** - Frame-indexed parameter interpolation
 2. **Motion Transforms** - Zoom, rotation, translation (X/Y/Z)
 3. **Depth Warping** - MiDaS depth-guided 3D motion
@@ -34,7 +34,7 @@ Prompt → CLIP → Noise → Denoise (UNet) → Decode → Motion Transform →
 5. **Strength Scheduling** - Variable denoising per frame
 6. **Noise Modes** - Fixed, incremental, subseed interpolation
 
-### 1.2 XLabs Deforum-X-Flux (FLUX.1)
+### 1.2 XLabs Koshi-X-Flux (FLUX.1)
 
 **Repository**: [XLabs-AI/deforum-x-flux](https://github.com/XLabs-AI/deforum-x-flux)
 
@@ -45,15 +45,15 @@ Prompt → CLIP → Noise → Denoise (UNet) → Decode → Motion Transform →
 | **Implementation** | Jupyter notebook + run.py |
 | **Animation Modes** | 2D, 3D, Interpolation |
 | **Motion Application** | Pixel space (traditional) |
-| **Keyframe System** | Same Deforum format |
+| **Keyframe System** | Same Koshi format |
 
 **Approach:**
-- Straightforward port of Deforum concepts to FLUX.1
+- Straightforward port of Koshi concepts to FLUX.1
 - No FLUX.2 support
 - No latent-space motion transforms
 - Relies on quantized flux-dev for efficiency
 
-### 1.3 Deforum2026 (This Codebase)
+### 1.3 koshi-flux (This Codebase)
 
 | Aspect | FLUX.1 | FLUX.2 | Klein |
 |--------|--------|--------|-------|
@@ -65,7 +65,7 @@ Prompt → CLIP → Noise → Denoise (UNet) → Decode → Motion Transform →
 
 **Architecture:**
 ```
-flux/src/deforum_flux/
+flux/src/koshi_flux/
 ├── pipeline/factory.py      # Version-agnostic factory
 ├── flux1/                   # 16-channel implementation
 │   ├── pipeline.py
@@ -77,7 +77,7 @@ flux/src/deforum_flux/
 │   └── config.py
 ├── shared/                  # Version-agnostic components
 │   ├── base_engine.py      # Abstract motion engine
-│   ├── parameter_adapter.py # Deforum schedule parser
+│   ├── parameter_adapter.py # Koshi schedule parser
 │   └── transforms.py       # Affine transforms
 └── feedback/               # FeedbackSampler processing
 ```
@@ -146,36 +146,36 @@ x = denoise(model, img=img_tokens, img_ids=img_ids,
 
 ---
 
-## 3. Deforum Concept Preservation Analysis
+## 3. Koshi Concept Preservation Analysis
 
 ### 3.1 Keyframe Schedule System ✅ PRESERVED
 
-**Original Deforum:**
+**Original Koshi:**
 ```python
 zoom = "0:(1.0), 30:(1.05), 60:(1.0)"
 angle = "0:(0), 15:(-5), 30:(0)"
 ```
 
-**Deforum2026 Implementation:**
+**koshi-flux Implementation:**
 ```python
 # shared/parameter_adapter.py - Full compatibility
-class FluxDeforumParameterAdapter:
+class FluxKoshiParameterAdapter:
     def parse_schedule(self, schedule: str, num_frames: int) -> List[float]:
         # Pattern: "frame:(value), frame:(value)"
         pattern = r'(\d+)\s*:\s*\(?\s*([-+]?\d*\.?\d+)\s*\)?'
         ...
 ```
 
-**Status:** Full backward compatibility with Deforum schedule format.
+**Status:** Full backward compatibility with Koshi schedule format.
 
 ### 3.2 Motion Transform System ✅ PRESERVED + ENHANCED
 
-**Original Deforum (Pixel Space):**
+**Original Koshi (Pixel Space):**
 ```
 Previous Frame → PIL Transform → Re-encode → Denoise → Output
 ```
 
-**Deforum2026 (Dual Mode):**
+**koshi-flux (Dual Mode):**
 
 1. **Pixel Mode (Traditional):**
 ```python
@@ -194,12 +194,12 @@ transformed_latent = self.motion_engine.apply_motion(prev_latent, motion_params)
 
 ### 3.3 Color Coherence ✅ PRESERVED + ENHANCED
 
-**Original Deforum:**
+**Original Koshi:**
 ```python
 color_coherence = "Match Frame 0"  # or "Match Previous"
 ```
 
-**Deforum2026:**
+**koshi-flux:**
 ```python
 # Multiple color matching modes
 color_coherence: str = "LAB"  # LAB (best), RGB, HSV, or None
@@ -214,7 +214,7 @@ def _match_color(self, source, reference, mode="LAB"):
 
 ### 3.4 Depth/3D Motion ⚠️ PARTIALLY PRESERVED
 
-**Original Deforum:**
+**Original Koshi:**
 ```python
 # MiDaS depth estimation + per-pixel warping
 use_depth_warping = True
@@ -223,7 +223,7 @@ fov = 40  # Field of view for 3D
 translation_z = "0:(0), 60:(10)"  # Depth motion
 ```
 
-**Deforum2026:**
+**koshi-flux:**
 ```python
 # Channel-based depth simulation (no MiDaS)
 def _compute_depth_weights(self, tz: float) -> List[float]:
@@ -236,12 +236,12 @@ def _compute_depth_weights(self, tz: float) -> List[float]:
 
 ### 3.5 Noise Modes ✅ PRESERVED + ENHANCED
 
-**Original Deforum:**
+**Original Koshi:**
 - Fixed seed
 - Incremental seed (seed + frame)
 - Subseed interpolation
 
-**Deforum2026:**
+**koshi-flux:**
 ```python
 noise_mode: str  # "fixed", "incremental", "slerp", "subseed"
 noise_type: str  # "gaussian", "perlin"
@@ -255,12 +255,12 @@ def _generate_perlin_noise(self, height, width, scale=4.0, octaves=4, seed=None)
 
 ### 3.6 Strength Scheduling ✅ PRESERVED
 
-**Original Deforum:**
+**Original Koshi:**
 ```python
 strength_schedule = "0:(0.65), 30:(0.4), 60:(0.65)"
 ```
 
-**Deforum2026:**
+**koshi-flux:**
 ```python
 strength_values = self._parse_param(
     deforum_params.get("strength_schedule", self.DEFAULTS["strength"]),
@@ -272,7 +272,7 @@ strength_values = self._parse_param(
 
 ### 3.7 FeedbackSampler Integration ✅ NEW ENHANCEMENT
 
-**Not in Original Deforum** - Innovation from community research:
+**Not in Original Koshi** - Innovation from community research:
 ```python
 # Order: Motion → Decode → Color Match → Sharpen → Noise → Encode → Denoise
 if feedback_mode:
@@ -306,15 +306,15 @@ if feedback_mode:
 **XLabs deforum-x-flux:**
 ```python
 # Simple notebook-based API
-from deforum_flux import DeforumFlux
-df = DeforumFlux(model="flux-dev")
+from koshi_flux import KoshiFlux
+df = KoshiFlux(model="flux-dev")
 df.animate(prompt="...", zoom="0:(1.0)...", frames=60)
 ```
 
-**Deforum2026:**
+**koshi-flux:**
 ```python
 # Factory pattern with explicit version selection
-from deforum_flux import create_pipeline, FluxVersion
+from koshi_flux import create_pipeline, FluxVersion
 pipe = create_pipeline(version=FluxVersion.FLUX_2_KLEIN_4B)
 video = pipe.generate_animation(prompts={0: "..."}, motion_params={...})
 ```
@@ -323,7 +323,7 @@ video = pipe.generate_animation(prompts={0: "..."}, motion_params={...})
 
 **Critical Finding:** FLUX requires much lower strength values than SD.
 
-| Parameter | Original Deforum (SD) | Deforum2026 (FLUX) |
+| Parameter | Original Koshi (SD) | koshi-flux (FLUX) |
 |-----------|----------------------|-------------------|
 | Strength | 0.5 - 0.7 | 0.25 - 0.35 |
 | Noise Scale | 1.0 | 0.2 |
@@ -335,11 +335,11 @@ video = pipe.generate_animation(prompts={0: "..."}, motion_params={...})
 
 ## 5. Recommendations
 
-### 5.1 Preserve Deforum Identity
+### 5.1 Preserve Koshi Identity
 
 1. **Maintain Schedule Format** - Keep `"frame:(value)"` syntax
 2. **Support Both Motion Spaces** - Pixel (traditional) + Latent (new)
-3. **Document Migration Path** - From SD Deforum to FLUX Deforum
+3. **Document Migration Path** - From SD Koshi to FLUX Koshi
 
 ### 5.2 Enhance for FLUX Architecture
 
@@ -360,11 +360,11 @@ video = pipe.generate_animation(prompts={0: "..."}, motion_params={...})
 ### Phase 1: Validation & Documentation
 1. [ ] Add MiDaS depth estimation option for FLUX.1/2
 2. [ ] Validate FLUX.2 channel semantics with empirical testing
-3. [ ] Document parameter migration from SD Deforum
+3. [ ] Document parameter migration from SD Koshi
 
 ### Phase 2: API Alignment
 1. [ ] Create simplified API matching XLabs style for ease of use
-2. [ ] Add Deforum preset configurations (smooth, creative, cinematic)
+2. [ ] Add Koshi preset configurations (smooth, creative, cinematic)
 3. [ ] Implement batch processing for longer animations
 
 ### Phase 3: Feature Parity
@@ -381,7 +381,7 @@ video = pipe.generate_animation(prompts={0: "..."}, motion_params={...})
 
 ## 7. File Reference Map
 
-| Deforum Concept | Implementation File | Line Numbers |
+| Koshi Concept | Implementation File | Line Numbers |
 |-----------------|---------------------|--------------|
 | Schedule Parsing | `shared/parameter_adapter.py` | 82-195 |
 | Motion Transform | `shared/base_engine.py` | Full file |
@@ -396,7 +396,7 @@ video = pipe.generate_animation(prompts={0: "..."}, motion_params={...})
 
 ## 8. Sources
 
-- [XLabs-AI/deforum-x-flux](https://github.com/XLabs-AI/deforum-x-flux) - FLUX.1 Deforum implementation
+- [XLabs-AI/deforum-x-flux](https://github.com/XLabs-AI/deforum-x-flux) - FLUX.1 Koshi implementation
 - [deforum/deforum-stable-diffusion](https://github.com/deforum/deforum-stable-diffusion) - Original (unmaintained)
 - [deforum-art/flux-fp8](https://github.com/deforum-art/flux-fp8) - Quantized Flux implementation
 - [Tok/sd-forge-deforum](https://github.com/Tok/sd-forge-deforum) - FLUX.1 WebUI fork with Parseq
@@ -406,10 +406,10 @@ video = pipe.generate_animation(prompts={0: "..."}, motion_params={...})
 
 ## 9. Conclusion
 
-The Deforum2026 codebase successfully adapts core Deforum concepts to FLUX architecture while introducing significant enhancements:
+The koshi-flux codebase successfully adapts core Koshi concepts to FLUX architecture while introducing significant enhancements:
 
 **Strengths:**
-- Full backward compatibility with Deforum schedule format
+- Full backward compatibility with Koshi schedule format
 - Dual motion space support (pixel + latent)
 - Version-agnostic design supporting FLUX 1/2/Klein
 - FeedbackSampler integration for superior temporal coherence
@@ -418,7 +418,7 @@ The Deforum2026 codebase successfully adapts core Deforum concepts to FLUX archi
 **Areas for Improvement:**
 - Add MiDaS depth estimation option
 - Validate FLUX.2 channel semantics empirically
-- Simplify API for easier migration from other Deforum implementations
+- Simplify API for easier migration from other Koshi implementations
 - Add missing animation modes (RANSAC, video input)
 
-The architecture is well-designed to stay true to Deforum's core philosophy of keyframe-based procedural animation while leveraging FLUX's superior image quality.
+The architecture is well-designed to stay true to Koshi's core philosophy of keyframe-based procedural animation while leveraging FLUX's superior image quality.

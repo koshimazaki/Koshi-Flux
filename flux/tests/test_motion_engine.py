@@ -8,8 +8,8 @@ import pytest
 import torch
 
 try:
-    from deforum_flux.flux1.motion_engine import Flux1MotionEngine
-    from deforum_flux.flux2.motion_engine import Flux2MotionEngine
+    from koshi_flux.flux1.motion_engine import Flux1MotionEngine
+    from koshi_flux.flux2.motion_engine import Flux2MotionEngine
     HAS_MOTION_ENGINE = True
 except ImportError:
     HAS_MOTION_ENGINE = False

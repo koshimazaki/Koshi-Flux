@@ -5,8 +5,8 @@ import pytest
 # Try to import API module - skip tests if not available
 try:
     from fastapi.testclient import TestClient
-    from deforum_flux.api import app
-    from deforum_flux.api.models.constants import AVAILABLE_MODELS, get_available_model_ids
+    from koshi_flux.api import app
+    from koshi_flux.api.models.constants import AVAILABLE_MODELS, get_available_model_ids
     HAS_API = True
 except (ImportError, AttributeError):
     HAS_API = False
@@ -20,7 +20,7 @@ except (ImportError, AttributeError):
 
 pytestmark = pytest.mark.skipif(
     not HAS_API,
-    reason="deforum_flux.api module not available or has import errors"
+    reason="koshi_flux.api module not available or has import errors"
 )
 
 

@@ -1,10 +1,10 @@
 """
-Basic Usage Example for FLUX Deforum Pipeline
+Basic Usage Example for Koshi FLUX Pipeline
 
 Demonstrates simple zoom animation with FLUX.1-dev.
 """
 
-from deforum_flux import create_pipeline, FluxVersion
+from koshi_flux import create_pipeline, FluxVersion
 
 
 def main():

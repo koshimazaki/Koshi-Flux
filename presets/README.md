@@ -1,4 +1,4 @@
-# Deforum V2V Presets
+# Koshi V2V Presets
 
 Video-to-video generation presets using FLUX.2 Klein with the native BFL SDK.
 
@@ -10,7 +10,7 @@ Video-to-video generation presets using FLUX.2 Klein with the native BFL SDK.
 | `v2v_motion` | Optical flow warping + generation | Motion preservation |
 | `v2v_temporal` | Temporal blending with previous frame | Smooth transitions |
 | `v2v_ultimate` | Motion + temporal + init image blending | Full quality |
-| `v2v_deforum` | Full Deforum pipeline with modes | Advanced control |
+| `v2v_full` | Full pipeline with modes | Advanced control |
 
 ## Quick Start
 
@@ -64,8 +64,8 @@ Combines motion warping + temporal blending + optional init image.
 - `--init`: Optional init image to blend with first frame
 - `--init-blend`: Init image blend weight
 
-### v2v_deforum
-Full Deforum pipeline with multiple modes:
+### v2v_full
+Full pipeline with multiple modes:
 - `--mode v2v`: Frame-by-frame stylization
 - `--mode hybrid`: Blend input with generations
 - `--mode motion`: Motion transfer from input to Klein output

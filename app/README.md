@@ -1,4 +1,4 @@
-# Deforum Video Generation App
+# Koshi Video Generation App
 
 Unified web application for AI video generation using FLUX and LTX models.
 
@@ -132,7 +132,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 ## Links
 
-- [FLUX Deforum](../flux/) - Animation pipeline
+- [FLUX Koshi](../flux/) - Animation pipeline
 - [LTX Video](../../LTX-Video/) - Text-to-video model
 
 ---

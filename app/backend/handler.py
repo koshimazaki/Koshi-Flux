@@ -58,9 +58,9 @@ def handler(event):
         sharpen_amount = input_data.get("sharpen_amount", 0.15)
 
         # Import and run
-        from deforum_flux import Flux1DeforumPipeline, FeedbackConfig
+        from koshi_flux import Flux1Pipeline, FeedbackConfig
 
-        pipe = Flux1DeforumPipeline(model_name=model, offload=True)
+        pipe = Flux1Pipeline(model_name=model, offload=True)
 
         steps = 4 if "schnell" in model else 20
         cfg = 1.0 if "schnell" in model else 3.5

@@ -5,7 +5,7 @@ import pytest
 # Try to import security module - skip tests if not available
 try:
     from fastapi import HTTPException
-    from deforum_flux.api.security import (
+    from koshi_flux.api.security import (
         is_malicious_input,
         sanitize_string_input,
         validate_numeric_input,
@@ -22,7 +22,7 @@ except (ImportError, ModuleNotFoundError):
 
 pytestmark = pytest.mark.skipif(
     not HAS_SECURITY,
-    reason="deforum_flux.api.security module not available"
+    reason="koshi_flux.api.security module not available"
 )
 
 

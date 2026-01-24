@@ -8,21 +8,21 @@ import pytest
 
 # Try to import from the actual installed location
 try:
-    from deforum_flux.bridge.parameter_adapter import (
-        FluxDeforumParameterAdapter,
+    from koshi_flux.bridge.parameter_adapter import (
+        FluxParameterAdapter,
         MotionFrame,
     )
-    from deforum.core.exceptions import ParameterError
+    from koshi.core.exceptions import ParameterError
     HAS_PARAMETER_ADAPTER = True
 except ImportError:
     try:
         # Try alternative import path
-        from deforum_flux.adapters import FluxDeforumParameterAdapter, MotionFrame
-        from deforum_flux.core import ParameterError
+        from koshi_flux.adapters import FluxParameterAdapter, MotionFrame
+        from koshi_flux.core import ParameterError
         HAS_PARAMETER_ADAPTER = True
     except ImportError:
         HAS_PARAMETER_ADAPTER = False
-        FluxDeforumParameterAdapter = None
+        FluxParameterAdapter = None
         MotionFrame = None
         ParameterError = Exception
 
@@ -39,7 +39,7 @@ class TestScheduleParsing:
 
     @pytest.fixture
     def adapter(self):
-        return FluxDeforumParameterAdapter()
+        return FluxParameterAdapter()
 
     def test_parse_simple_schedule(self, adapter):
         """Parse basic keyframe schedule."""
@@ -105,7 +105,7 @@ class TestDeforumConversion:
 
     @pytest.fixture
     def adapter(self):
-        return FluxDeforumParameterAdapter()
+        return FluxParameterAdapter()
 
     def test_convert_string_params(self, adapter):
         """Convert string schedule parameters."""
@@ -206,7 +206,7 @@ class TestSimpleAnimation:
 
     @pytest.fixture
     def adapter(self):
-        return FluxDeforumParameterAdapter()
+        return FluxParameterAdapter()
 
     def test_zoom_animation(self, adapter):
         """Create simple zoom animation."""
@@ -239,7 +239,7 @@ class TestValidation:
 
     def test_strict_validation_out_of_range(self):
         """Strict mode should reject out-of-range values."""
-        adapter = FluxDeforumParameterAdapter(strict_validation=True)
+        adapter = FluxParameterAdapter(strict_validation=True)
 
         params = {
             "zoom": 5.0,  # Way out of typical range
@@ -250,7 +250,7 @@ class TestValidation:
 
     def test_lenient_validation(self):
         """Non-strict mode should allow out-of-range values."""
-        adapter = FluxDeforumParameterAdapter(strict_validation=False)
+        adapter = FluxParameterAdapter(strict_validation=False)
 
         params = {
             "zoom": 5.0,
@@ -266,7 +266,7 @@ class TestMotionScheduleGeneration:
 
     @pytest.fixture
     def adapter(self):
-        return FluxDeforumParameterAdapter()
+        return FluxParameterAdapter()
 
     def test_generate_schedule_dict(self, adapter):
         """Generate schedule dictionary from frames."""

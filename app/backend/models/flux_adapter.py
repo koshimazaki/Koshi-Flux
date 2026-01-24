@@ -1,5 +1,5 @@
 """
-FLUX Deforum Adapter - Wraps the FLUX pipeline for the unified API.
+Koshi FLUX Adapter - Wraps the FLUX pipeline for the unified API.
 """
 
 import sys
@@ -12,7 +12,7 @@ sys.path.insert(0, str(FLUX_PATH))
 
 
 class FluxAdapter:
-    """Adapter for FLUX Deforum pipeline."""
+    """Adapter for Koshi FLUX pipeline."""
 
     def __init__(self, model_name: str = "flux-schnell", device: str = "cuda"):
         self.model_name = model_name
@@ -22,8 +22,8 @@ class FluxAdapter:
     def _load_pipeline(self):
         """Lazy load the pipeline."""
         if self._pipeline is None:
-            from deforum_flux import Flux1DeforumPipeline
-            self._pipeline = Flux1DeforumPipeline(
+            from koshi_flux import Flux1Pipeline
+            self._pipeline = Flux1Pipeline(
                 model_name=self.model_name,
                 device=self.device,
                 offload=True,
@@ -46,8 +46,8 @@ class FluxAdapter:
         callback: Optional[Callable] = None,
         output_dir: str = "./outputs",
     ) -> Path:
-        """Generate video using FLUX Deforum."""
-        from deforum_flux import FeedbackConfig
+        """Generate video using Koshi FLUX."""
+        from koshi_flux import FeedbackConfig
 
         pipe = self._load_pipeline()
 

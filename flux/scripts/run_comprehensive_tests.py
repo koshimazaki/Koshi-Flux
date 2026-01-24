@@ -129,9 +129,9 @@ class TestRunner:
 def test_imports():
     """Test all required imports."""
     import torch
-    from deforum_flux import create_flux1_pipeline, FluxVersion
-    from deforum_flux.shared import FluxDeforumParameterAdapter, MotionFrame
-    from deforum_flux.flux1 import Flux1MotionEngine, FLUX1_CONFIG
+    from koshi_flux import create_flux1_pipeline, FluxVersion
+    from koshi_flux.shared import FluxParameterAdapter, MotionFrame
+    from koshi_flux.flux1 import Flux1MotionEngine, FLUX1_CONFIG
     from flux.sampling import get_noise, prepare, denoise, unpack
     return {"torch_version": torch.__version__}
 
@@ -154,9 +154,9 @@ def test_cuda_available():
 
 def test_parameter_adapter():
     """Test schedule parsing."""
-    from deforum_flux.shared import FluxDeforumParameterAdapter
+    from koshi_flux.shared import FluxParameterAdapter
     
-    adapter = FluxDeforumParameterAdapter()
+    adapter = FluxParameterAdapter()
     
     # Test basic schedule
     schedule = "0:(1.0), 30:(1.05), 60:(1.0)"
@@ -178,7 +178,7 @@ def test_parameter_adapter():
 def test_motion_engine_cpu():
     """Test motion engine on CPU."""
     import torch
-    from deforum_flux.flux1 import Flux1MotionEngine
+    from koshi_flux.flux1 import Flux1MotionEngine
     
     engine = Flux1MotionEngine(device="cpu")
     
@@ -209,7 +209,7 @@ def test_motion_engine_cpu():
 def test_motion_engine_gpu():
     """Test motion engine on GPU."""
     import torch
-    from deforum_flux.flux1 import Flux1MotionEngine
+    from koshi_flux.flux1 import Flux1MotionEngine
     
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA required")
@@ -241,7 +241,7 @@ def test_motion_engine_gpu():
 
 def test_pipeline_init():
     """Test pipeline initialization (no model loading)."""
-    from deforum_flux import create_flux1_pipeline
+    from koshi_flux import create_flux1_pipeline
     
     pipe = create_flux1_pipeline(device="cuda", offload=True)
     
@@ -257,7 +257,7 @@ def test_pipeline_init():
 def test_model_loading():
     """Test FLUX model loading."""
     import torch
-    from deforum_flux import create_flux1_pipeline
+    from koshi_flux import create_flux1_pipeline
     
     pipe = create_flux1_pipeline(device="cuda", offload=True)
     
@@ -279,7 +279,7 @@ def test_model_loading():
 def test_single_frame_generation():
     """Test single frame generation."""
     import torch
-    from deforum_flux import create_flux1_pipeline
+    from koshi_flux import create_flux1_pipeline
     
     pipe = create_flux1_pipeline(device="cuda", offload=True)
     
@@ -316,7 +316,7 @@ def test_single_frame_generation():
 def test_short_animation():
     """Test short animation generation (5 frames)."""
     import torch
-    from deforum_flux import create_flux1_pipeline
+    from koshi_flux import create_flux1_pipeline
     
     pipe = create_flux1_pipeline(device="cuda", offload=True)
     
@@ -354,7 +354,7 @@ def test_short_animation():
 def test_latent_pack_unpack():
     """Test latent packing/unpacking roundtrip."""
     import torch
-    from deforum_flux import create_flux1_pipeline
+    from koshi_flux import create_flux1_pipeline
     from flux.sampling import unpack
     
     pipe = create_flux1_pipeline(device="cuda", offload=True)

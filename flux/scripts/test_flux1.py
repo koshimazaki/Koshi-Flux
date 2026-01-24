@@ -22,7 +22,7 @@ def test_single_image():
     logger.info("FLUX.1 Single Image Test")
     logger.info("=" * 50)
 
-    from deforum_flux import create_flux1_pipeline
+    from koshi_flux import create_flux1_pipeline
 
     pipe = create_flux1_pipeline(device="cuda", offload=True)
 
@@ -54,7 +54,7 @@ def test_animation():
     logger.info("FLUX.1 Animation Test")
     logger.info("=" * 50)
 
-    from deforum_flux import create_flux1_pipeline
+    from koshi_flux import create_flux1_pipeline
 
     pipe = create_flux1_pipeline(device="cuda", offload=True)
 

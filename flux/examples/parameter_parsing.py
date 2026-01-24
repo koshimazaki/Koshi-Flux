@@ -5,13 +5,13 @@ Demonstrates how Deforum-style string schedules are converted
 to per-frame motion parameters.
 """
 
-from deforum_flux.adapters import FluxDeforumParameterAdapter, MotionFrame
+from koshi_flux.adapters import FluxParameterAdapter, MotionFrame
 
 
 def main():
-    adapter = FluxDeforumParameterAdapter()
+    adapter = FluxParameterAdapter()
     
-    print("FLUX Deforum Parameter Adapter Demo")
+    print("Koshi FLUX Parameter Adapter Demo")
     print("=" * 50)
     
     # Example 1: Parse simple schedule

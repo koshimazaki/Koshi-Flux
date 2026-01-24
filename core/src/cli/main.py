@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Main CLI for Deforum Flux
+Main CLI for Koshi Flux
 
 """
 
@@ -10,28 +10,28 @@ import time
 from pathlib import Path
 from typing import List
 
-from deforum.config.settings import Config, get_preset
-from deforum_flux.bridge import FluxDeforumBridge
-from deforum_flux.shared import FluxDeforumParameterAdapter
-from deforum.core.logging_config import setup_logging
-from deforum.core.exceptions import DeforumException
-from deforum.utils.file_utils import FileUtils
-from deforum.utils.validation import InputValidator
+from koshi.config.settings import Config, get_preset
+from koshi_flux.bridge import FluxBridge
+from koshi_flux.shared import FluxParameterAdapter
+from koshi.core.logging_config import setup_logging
+from koshi.core.exceptions import KoshiException
+from koshi.utils.file_utils import FileUtils
+from koshi.utils.validation import InputValidator
 
 
-class FluxDeforumCLI:
-    """Main CLI class for Flux-Deforum integration."""
+class FluxCLI:
+    """Main CLI class for Koshi-Flux integration."""
     
     def __init__(self):
         """Initialize the CLI."""
-        self.adapter = FluxDeforumParameterAdapter()
+        self.adapter = FluxParameterAdapter()
         self.validator = InputValidator()
         self.file_utils = FileUtils()
         
     def create_parser(self) -> argparse.ArgumentParser:
         """Create argument parser."""
         parser = argparse.ArgumentParser(
-            description="Flux + Deforum Animation CLI - Production Ready",
+            description="Koshi Flux Animation CLI - Production Ready",
             formatter_class=argparse.RawDescriptionHelpFormatter,
             epilog="""
 Examples:
@@ -327,7 +327,7 @@ Examples:
                 structured_logging=False
             )
             
-            print("🎬 Flux + Deforum CLI - Production Ready")
+            print("🎬 Koshi Flux CLI - Production Ready")
             print("=" * 50)
             
             # Validate arguments
@@ -363,8 +363,8 @@ Examples:
             print(f"  Frames: {config.max_frames}")
 
             # Initialize bridge
-            print("\n🔧 Initializing Flux-Deforum Bridge...")
-            bridge = FluxDeforumBridge(config)
+            print("\n🔧 Initializing Koshi-Flux Bridge...")
+            bridge = FluxBridge(config)
 
             # Create motion schedule from motion config
             motion_schedule = motion_config.to_motion_schedule()
@@ -426,8 +426,8 @@ Examples:
             
             return 0
             
-        except DeforumException as e:
-            print(f"\n==[X]== Deforum error: {e}")
+        except KoshiException as e:
+            print(f"\n==[X]== Koshi error: {e}")
             if hasattr(e, 'details') and e.details:
                 print(f"Details: {e.details}")
             return 1
@@ -446,7 +446,7 @@ Examples:
 
 def main():
     """Main entry point."""
-    cli = FluxDeforumCLI()
+    cli = FluxCLI()
     return cli.run()
 
 
