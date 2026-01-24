@@ -317,6 +317,8 @@ class Flux2DeforumPipeline:
         correction_config: Optional[AdaptiveCorrectionConfig] = None,
         # Noise coherence for temporal consistency (KEY FIX for "random frames")
         noise_coherence: Optional[NoiseCoherenceConfig] = None,
+        # Static seed: use same seed for all frames (like diffusers Old Reliable)
+        static_seed: bool = False,
     ) -> str:
         """
         Generate Deforum-style animation using native FLUX.2/Klein.
@@ -436,6 +438,7 @@ class Flux2DeforumPipeline:
                 texture_prompt=texture_prompt,
                 correction_config=correction_config,
                 noise_coherence=noise_coherence,
+                static_seed=static_seed,
             )
 
             # Save frames
@@ -477,6 +480,7 @@ class Flux2DeforumPipeline:
         texture_prompt: Optional[str] = None,
         correction_config: Optional[AdaptiveCorrectionConfig] = None,
         noise_coherence: Optional[NoiseCoherenceConfig] = None,
+        static_seed: bool = False,
     ) -> List[Image.Image]:
         """
         Core generation loop with two modes.
@@ -521,7 +525,7 @@ class Flux2DeforumPipeline:
         self._noise_manager = WarpedNoiseManager(config=noise_coherence, seed=seed)
 
         for i, motion_frame in enumerate(tqdm(motion_frames, desc="Generating")):
-            frame_seed = seed + i
+            frame_seed = seed if static_seed else seed + i
             motion_dict = motion_frame.to_dict()
             detection = None
 
