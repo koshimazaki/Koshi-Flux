@@ -8,7 +8,9 @@
 ░░░░░░░░░░░░░░░░ V2V Motion Pipeline for FLUX ░░░░░░░░░░░░░░░░░░░░░░░░░░░
 ```
 
-Optical flow + temporal blending + color matching. Works with FLUX.1 and FLUX.2.
+Video-to-video motion pipeline for [FLUX.2](https://blackforestlabs.ai/) models. Optical flow warping, temporal blending, and color matching for coherent stylized video. Inspired by [Deforum](https://deforum.art/) animation techniques.
+
+**ComfyUI users**: Check out [ComfyUI-Koshi-Nodes](https://github.com/koshimazaki/ComfyUI-Koshi-Nodes) for node-based workflows with shaders, motion nodes, and binary OLED export.
 
 ## Install
 
@@ -44,10 +46,6 @@ python presets/klein_v2v_motion.py -i input.mp4 -p "oil painting" -o output.mp4
 --seed            Random seed
 ```
 
-## Examples
-
-<!-- Add examples here -->
-
 ## Requirements
 
 - Python 3.10+
@@ -67,4 +65,4 @@ Koshi-Flux: V2V Motion Pipeline
 Author: Koshi Mazaki
 ```
 
-Uses [FLUX.2](https://github.com/black-forest-labs/flux2) by Black Forest Labs.
+Uses [FLUX.2](https://blackforestlabs.ai/) by Black Forest Labs.
