@@ -1,0 +1,29 @@
+# Reference/external code
+ltx-video-ref/
+
+# OS
+.DS_Store
+
+# Python bytecode
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyc
+
+# Environments
+.env
+.venv
+env/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Build
+*.egg-info/
+dist/
+build/

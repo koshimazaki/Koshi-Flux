@@ -1,0 +1,32 @@
+# FLUX Deforum Pipeline - Dependencies
+# For RunPod RTX 5090 (SM_120)
+
+# PyTorch (nightly for 5090 support)
+--extra-index-url https://download.pytorch.org/whl/nightly/cu128
+torch
+torchvision
+
+# Core
+numpy>=1.24.0
+scipy>=1.10.0
+einops>=0.7.0
+pillow>=10.0.0
+tqdm>=4.65.0
+
+# Hugging Face
+transformers>=4.38.0
+accelerate>=0.27.0
+safetensors>=0.4.0
+huggingface_hub>=0.20.0
+sentencepiece>=0.1.99
+
+# FLUX.2 text encoder (Mistral)
+# Note: Requires HF access to mistralai/Mistral-Small-3.2-24B-Instruct-2506
+
+# Video encoding
+imageio>=2.34.0
+imageio-ffmpeg>=0.4.9
+opencv-python-headless>=4.8.0
+
+# Optional: for visualization
+matplotlib>=3.8.0

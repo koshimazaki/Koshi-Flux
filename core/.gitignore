@@ -1,20 +1,3 @@
-# Auto detect text files and perform LF normalization
-* text=auto
-dist/
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-*.egg-info/
-_DS_Store
-*.DS_Store
-*.bak
-*.log
-*.log.*
-*.log.*.*
-*.log.*.*.*
-*.log.*.*.*.*
-*.log.*.*.*.*.*
 dist/
 __pycache__/
 *.py[cod]
