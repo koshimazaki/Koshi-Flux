@@ -8,11 +8,8 @@
 ░░░░░░░░░░░░░░░░ V2V Motion Pipeline for FLUX ░░░░░░░░░░░░░░░░░░░░░░░░░░░
 ```
 
-<<<<<<< HEAD
-Motion pipeline for [FLUX.2](https://blackforestlabs.ai/) models. Optical flow warping, temporal blending, and color matching for coherent stylized video. Inspired by [Deforum](https://github.com/deforum) animation techniques. Tested on Klain 4b, and 8B models. Partly compatible with Flux.1 due to latent channel count.
-=======
+
 Motion pipeline for [FLUX.2](https://blackforestlabs.ai/) models. Optical flow warping, temporal blending, and color matching for coherent stylized video. Inspired by [Deforum](https://github.com/deforum) animation techniques. Tested on Klain 4b, and 9B models. Partly compatible with Flux.1 due to latent channel count.
->>>>>>> 789c41628d0a0996c291dbacd9583249fa2f1ac6
 
 **ComfyUI Nodes**: Set of nodes including Flux Motion is here [ComfyUI-Koshi-Nodes](https://github.com/koshimazaki/ComfyUI-Koshi-Nodes) use these for node-based workflows with shaders, motion nodes, and binary OLED export.
 
