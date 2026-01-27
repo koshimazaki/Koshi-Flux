@@ -19,19 +19,19 @@ class FluxVersion(Enum):
 
     Uses consistent naming format: flux.{major}-{variant}
 
-    FLUX.1: 16-channel latents (original architecture)
-    FLUX.2: 128-channel latents (new architecture)
-    Klein: 128-channel, smaller/faster models (4B, 9B variants)
+    FLUX.1: VAE z_channels=16, DiT input=64 (2×2 × 16)
+    FLUX.2: VAE z_channels=32, DiT input=128 (2×2 × 32)
+    Klein: Same architecture as FLUX.2, smaller transformer (4B, 9B)
     """
 
-    # FLUX.1 variants (16 channels)
+    # FLUX.1 variants (VAE 16ch, DiT 64 tokens)
     FLUX_1_DEV = "flux.1-dev"
     FLUX_1_SCHNELL = "flux.1-schnell"
 
-    # FLUX.2 variants (128 channels)
+    # FLUX.2 variants (VAE 32ch, DiT 128 tokens)
     FLUX_2_DEV = "flux.2-dev"
 
-    # Klein variants (128 channels, smaller/faster)
+    # Klein variants (same latent space as FLUX.2, smaller/faster)
     FLUX_2_KLEIN_4B = "flux.2-klein-4b"
     FLUX_2_KLEIN_9B = "flux.2-klein-9b"
 
@@ -52,10 +52,14 @@ class FluxVersion(Enum):
 
     @property
     def num_channels(self) -> int:
-        """Get latent channel count."""
+        """Get channel count for motion transforms.
+
+        FLUX.1: 16 (VAE z_channels, motion operates pre-patchify)
+        FLUX.2: 128 (DiT input dim, motion operates on packed tokens = 2×2 × 32)
+        """
         if self in (FluxVersion.FLUX_1_DEV, FluxVersion.FLUX_1_SCHNELL):
             return 16
-        return 128  # FLUX.2 and Klein all use 128 channels
+        return 128  # FLUX.2/Klein: patchified token dim (2×2 × 32 z_channels)
 
     @property
     def is_flux_1(self) -> bool:

@@ -1,4 +1,11 @@
-"""FLUX.1 Configuration - Configurable defaults."""
+"""FLUX.1 Configuration - Configurable defaults.
+
+FLUX.1 VAE latent space: 16 channels (z_channels=16 in BFL autoencoder)
+DiT input after patchify: 64 tokens (patch_size² × z_channels = 2×2 × 16 = 64)
+Motion transforms operate on the unpacked 16-channel spatial latent.
+
+Source: flux-main/src/flux/autoencoder.py (z_channels=16)
+"""
 
 from dataclasses import dataclass
 from typing import Dict, Any, Tuple
@@ -13,7 +20,8 @@ class Flux1Config:
     """
 
     # Model settings
-    num_channels: int = 16
+    # VAE z_channels=16, patchified to 64 for DiT (2×2 × 16 = 64)
+    num_channels: int = 16  # VAE latent channels (motion operates pre-patchify)
     channel_groups: Tuple[Tuple[int, int], ...] = ((0, 4), (4, 8), (8, 12), (12, 16))
 
     # Generation defaults

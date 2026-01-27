@@ -1,7 +1,15 @@
 """FLUX.2 Configuration - Configurable defaults.
 
 IMPORTANT: FLUX uses different latent architecture than Stable Diffusion.
-Original Deforum was built for SD's 4-channel latents. FLUX.2 uses 128 channels.
+Original Deforum was built for SD's 4-channel latents.
+
+FLUX.2 VAE latent space: 32 channels (z_channels=32 in autoencoder.py)
+DiT input after patchify: 128 tokens (patch_size² × z_channels = 2×2 × 32 = 128)
+Motion transforms operate on the 128-dim packed token representation.
+
+Source: flux2-main/src/flux2/autoencoder.py (z_channels=32)
+        flux2-main/src/flux2/model.py (in_channels=128)
+
 Animation parameters need to be much more conservative to prevent:
 - Burning (contrast/saturation accumulation in pixel mode)
 - Blurring (detail loss in latent mode)
@@ -20,7 +28,8 @@ class Flux2Config:
     """
 
     # Model settings
-    num_channels: int = 128
+    # VAE z_channels=32, patchified to 128 for DiT (2×2 × 32 = 128)
+    num_channels: int = 128  # DiT input dim (packed token representation)
     num_channel_groups: int = 8
     channels_per_group: int = 16
 
@@ -34,12 +43,13 @@ class Flux2Config:
     # Texture, Fine detail, Semantic, Transitions
     depth_weights: Tuple[float, ...] = (0.35, 0.28, 0.18, 0.08, -0.05, -0.15, -0.25, -0.30)
 
-    # Semantic channel assignments (hypothetical based on 128ch structure)
-    # These may need adjustment based on actual FLUX.2 latent semantics
-    structure_channels: Tuple[int, int] = (0, 32)   # Channels 0-31
-    color_channels: Tuple[int, int] = (32, 64)      # Channels 32-63
-    texture_channels: Tuple[int, int] = (64, 96)    # Channels 64-95
-    detail_channels: Tuple[int, int] = (96, 128)    # Channels 96-127
+    # Channel group assignments for motion transforms.
+    # These are operational groupings, NOT verified semantic roles.
+    # The 128 dims come from patchifying 32 VAE latent channels (2×2 patches).
+    group_0_channels: Tuple[int, int] = (0, 32)
+    group_1_channels: Tuple[int, int] = (32, 64)
+    group_2_channels: Tuple[int, int] = (64, 96)
+    group_3_channels: Tuple[int, int] = (96, 128)
 
     @property
     def channel_groups(self) -> Tuple[Tuple[int, int], ...]:
