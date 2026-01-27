@@ -8,7 +8,7 @@
 ░░░░░░░░░░░░░░░░ V2V Motion Pipeline for FLUX ░░░░░░░░░░░░░░░░░░░░░░░░░░░
 ```
 
-Video-to-video motion pipeline for [FLUX.2](https://blackforestlabs.ai/) models. Optical flow warping, temporal blending, and color matching for coherent stylized video. Inspired by [Deforum](https://deforum.art/) animation techniques.
+Video-to-video motion pipeline for [FLUX.2](https://blackforestlabs.ai/) models. Optical flow warping, temporal blending, and color matching for coherent stylized video. Inspired by [Deforum](https://github.com/deforum) animation techniques.
 
 **ComfyUI users**: Check out [ComfyUI-Koshi-Nodes](https://github.com/koshimazaki/ComfyUI-Koshi-Nodes) for node-based workflows with shaders, motion nodes, and binary OLED export.
 
@@ -65,4 +65,4 @@ Koshi-Flux: V2V Motion Pipeline
 Author: Koshi Mazaki
 ```
 
-Uses [FLUX.2](https://blackforestlabs.ai/) by Black Forest Labs.
+Uses [FLUX.2](https://github.com/black-forest-labs/flux2) by Black Forest Labs.
