@@ -119,12 +119,12 @@ class TestFlux2Config:
         """Should have 8 depth weights."""
         assert len(FLUX2_CONFIG.depth_weights) == 8
 
-    def test_semantic_channels(self):
-        """Semantic channel ranges should be valid."""
-        assert FLUX2_CONFIG.structure_channels == (0, 32)
-        assert FLUX2_CONFIG.color_channels == (32, 64)
-        assert FLUX2_CONFIG.texture_channels == (64, 96)
-        assert FLUX2_CONFIG.detail_channels == (96, 128)
+    def test_channel_group_ranges(self):
+        """Channel group ranges should cover full 128-dim token space."""
+        assert FLUX2_CONFIG.group_0_channels == (0, 32)
+        assert FLUX2_CONFIG.group_1_channels == (32, 64)
+        assert FLUX2_CONFIG.group_2_channels == (64, 96)
+        assert FLUX2_CONFIG.group_3_channels == (96, 128)
 
     def test_config_to_dict(self):
         """Config should convert to dict."""
