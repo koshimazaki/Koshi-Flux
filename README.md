@@ -13,7 +13,7 @@ Motion pipeline for [FLUX.2](https://blackforestlabs.ai/) models. Optical flow w
 **ComfyUI Nodes**: Set of nodes including Flux Motion is here [ComfyUI-Koshi-Nodes](https://github.com/koshimazaki/ComfyUI-Koshi-Nodes) use these for node-based workflows with shaders, motion nodes, and binary OLED export.
 
 <div align="center">
-  <video src="https://github.com/user-attachments/assets/b1cdeb62-f4cc-439f-a8eb-267806b55f7a" width="480" autoplay loop muted></video>
+  <video src="https://github.com/user-attachments/assets/b1cdeb62-f4cc-439f-a8eb-267806b55f7a" width="320" autoplay loop muted></video>
   <em>FLUX.2 Klein 4B — hybrid video with strength ramp and prompt scheduling for aesthetic morphing</em>
 </div>
 
