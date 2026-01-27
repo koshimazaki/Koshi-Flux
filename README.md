@@ -14,7 +14,6 @@ Motion pipeline for [FLUX.2](https://blackforestlabs.ai/) models. Optical flow w
 
 <div align="center">
   <video src="https://github.com/user-attachments/assets/b1cdeb62-f4cc-439f-a8eb-267806b55f7a" width="480" autoplay loop muted></video>
-  <br>
   <em>FLUX.2 Klein 4B — hybrid video with strength ramp and prompt scheduling for aesthetic morphing</em>
 </div>
 
