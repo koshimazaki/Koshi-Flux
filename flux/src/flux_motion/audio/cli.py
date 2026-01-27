@@ -3,16 +3,16 @@
 
 Usage:
     # Extract features and generate schedule
-    python -m koshi_flux.audio.cli music.mp3 -o schedule.json
+    python -m flux_motion.audio.cli music.mp3 -o schedule.json
 
     # Use a specific mapping preset
-    python -m koshi_flux.audio.cli music.mp3 -m bass_pulse -o schedule.json
+    python -m flux_motion.audio.cli music.mp3 -m bass_pulse -o schedule.json
 
     # List available presets
-    python -m koshi_flux.audio.cli --list-presets
+    python -m flux_motion.audio.cli --list-presets
 
     # Generate with custom settings
-    python -m koshi_flux.audio.cli music.mp3 -m spectrum --fps 30 --duration 60
+    python -m flux_motion.audio.cli music.mp3 -m spectrum --fps 30 --duration 60
 """
 
 import argparse
@@ -36,19 +36,19 @@ def main():
         epilog="""
 Examples:
   # Basic usage - extract features and generate schedule
-  python -m koshi_flux.audio.cli music.mp3 -o schedule.json
+  python -m flux_motion.audio.cli music.mp3 -o schedule.json
 
   # Use a specific mapping preset
-  python -m koshi_flux.audio.cli music.mp3 -m bass_pulse -o schedule.json
+  python -m flux_motion.audio.cli music.mp3 -m bass_pulse -o schedule.json
 
   # Generate with custom FPS and duration
-  python -m koshi_flux.audio.cli music.mp3 --fps 30 --duration 60 -o schedule.json
+  python -m flux_motion.audio.cli music.mp3 --fps 30 --duration 60 -o schedule.json
 
   # Save features for later use
-  python -m koshi_flux.audio.cli music.mp3 --save-features features.json
+  python -m flux_motion.audio.cli music.mp3 --save-features features.json
 
   # Generate Deforum keyframe strings
-  python -m koshi_flux.audio.cli music.mp3 -m spectrum --format deforum
+  python -m flux_motion.audio.cli music.mp3 -m spectrum --format deforum
 
 Available mapping presets:
   ambient       - Subtle, flowing movement for atmospheric content

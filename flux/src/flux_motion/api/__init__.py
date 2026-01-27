@@ -7,7 +7,7 @@ Usage:
     from flux_motion.api import app
 
     # Or run directly:
-    python -m koshi_flux.api.main
+    python -m flux_motion.api.main
 """
 
 from .main import app, run_server

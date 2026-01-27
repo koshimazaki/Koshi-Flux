@@ -1,1 +1,1 @@
-"""API tests for koshi_flux."""
+"""API tests for flux_motion."""

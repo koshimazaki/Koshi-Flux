@@ -1,4 +1,4 @@
-"""Allow running audio module as: python -m koshi_flux.audio"""
+"""Allow running audio module as: python -m flux_motion.audio"""
 
 from .cli import main
 

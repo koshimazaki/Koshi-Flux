@@ -90,11 +90,9 @@ class TestFluxVersionEnum:
         assert FluxVersion.FLUX_1_SCHNELL.default_steps == 4
 
     def test_klein_model_names(self):
-        """Klein should map to HuggingFace repo IDs."""
-        assert "black-forest-labs" in FluxVersion.FLUX_2_KLEIN_4B.model_name
-        assert "black-forest-labs" in FluxVersion.FLUX_2_KLEIN_9B.model_name
-        assert "4B" in FluxVersion.FLUX_2_KLEIN_4B.model_name
-        assert "9B" in FluxVersion.FLUX_2_KLEIN_9B.model_name
+        """Klein model names should contain variant identifiers."""
+        assert "klein-4b" in FluxVersion.FLUX_2_KLEIN_4B.model_name
+        assert "klein-9b" in FluxVersion.FLUX_2_KLEIN_9B.model_name
 
 
 @pytest.mark.skipif(not HAS_CONFIG, reason="Config module not available")

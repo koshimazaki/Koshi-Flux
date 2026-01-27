@@ -10,7 +10,7 @@ Key difference from our existing pipeline:
 - Processing order: zoom -> decode -> color match -> contrast -> sharpen -> noise -> encode -> denoise
 
 Usage:
-    python -m koshi_flux.feedback_sampler --prompt "your prompt" --iterations 30
+    python -m flux_motion.feedback_sampler --prompt "your prompt" --iterations 30
 
 Based on: https://github.com/pizurny/Comfyui-FeedbackSampler
 """

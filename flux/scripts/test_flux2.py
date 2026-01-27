@@ -48,9 +48,9 @@ def test_imports():
     try:
         from flux_motion.flux2 import Flux2Pipeline, Flux2MotionEngine
         from flux_motion import create_flux2_pipeline
-        logger.info("  koshi_flux: OK")
+        logger.info("  flux_motion: OK")
     except ImportError as e:
-        logger.error(f"  koshi_flux: FAILED - {e}")
+        logger.error(f"  flux_motion: FAILED - {e}")
         return False
 
     logger.info("All imports OK!\n")
