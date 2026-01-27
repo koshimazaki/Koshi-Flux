@@ -5,7 +5,7 @@
 ██╔═██╗ ██║   ██║╚════██║██╔══██║██║    ██╔══╝  ██║     ██║   ██║ ██╔██╗
 ██║  ██╗╚██████╔╝███████║██║  ██║██║    ██║     ███████╗╚██████╔╝██╔╝ ██╗
 ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝    ╚═╝     ╚══════╝ ╚═════╝ ╚═╝  ╚═╝
-░░░░░░░░░░░░░░░░ Motion Pipeline for FLUX models ░░░░░░░░░░░░░░░░░░░░░░░░░░░
+░░░░░░░░░░░░░░░░ Motion Pipeline for BFL FLUX models ░░░░░░░░░░░░░░░░░░░░
 ```
 
 Motion pipeline for [FLUX.2](https://blackforestlabs.ai/) models. Optical flow warping, temporal blending, and color matching for coherent stylized video. Inspired by [Deforum](https://github.com/deforum) animation techniques. Tested on Klein 4B and 9B models. Includes FLUX.1 support.
