@@ -12,6 +12,11 @@ V2V motion pipeline for [FLUX.2](https://blackforestlabs.ai/) Klein models. Opti
 
 **ComfyUI**: [ComfyUI-Koshi-Nodes](https://github.com/koshimazaki/ComfyUI-Koshi-Nodes)
 
+<div align="center">
+  <video src="https://github.com/user-attachments/assets/b1cdeb62-f4cc-439f-a8eb-267806b55f7a" width="320" autoplay loop muted></video>
+  <em>Klein 4B — hybrid video with strength ramp and prompt scheduling</em>
+</div>
+
 ## Modes
 
 | Mode | Pipeline | Status |
