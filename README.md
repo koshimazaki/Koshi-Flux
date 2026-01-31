@@ -37,24 +37,31 @@ pip install -e ./flux
 ## Usage
 
 ```bash
-# V2V with optical flow (best results)
-python presets/klein_v2v_motion.py -i input.mp4 -p "oil painting" -o output.mp4
+# Diffusers (text2video)
+python presets/diffusers/klein_diffusers.py --frames 30 -p "mystical forest"
 
-# V2V with motion schedules
-python presets/klein_v2v_deforum.py -i input.mp4 -p "cyberpunk" \
-    --zoom "0:(1.0), 60:(1.05)" --angle "0:(0), 30:(5)" -o output.mp4
+# Hybrid V2V (recommended)
+python presets/hybrid-v2v/klein_v2v_motion.py -i input.mp4 -p "oil painting"
+
+# Native (experimental)
+python presets/native/klein_native.py -i input.mp4 -p "watercolor"
 ```
 
 ## Presets
 
-| Preset | Features |
-|--------|----------|
-| `klein_v2v_pure` | Direct img2img |
-| `klein_v2v_motion` | + Optical flow |
-| `klein_v2v_temporal` | + Frame blending |
-| `klein_v2v_ultimate` | All V2V features |
-| `klein_v2v_deforum` | + Motion engine schedules |
-| `klein_hybrid_deforum` | FeedbackProcessor pipeline |
+```
+presets/
+├── diffusers/       # Full diffusers pipeline
+├── hybrid-v2v/      # Diffusers VAE + BFL denoise
+└── native/          # Pure BFL SDK
+```
+
+| Folder | Preset | Features |
+|--------|--------|----------|
+| diffusers | `klein_diffusers` | Text2Video with zoom |
+| hybrid-v2v | `klein_v2v_motion` | Optical flow V2V |
+| hybrid-v2v | `klein_v2v_deforum` | + Motion schedules |
+| native | `klein_native` | Pure BFL, no diffusers |
 
 ## Parameters
 
