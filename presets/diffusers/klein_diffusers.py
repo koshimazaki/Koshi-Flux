@@ -12,6 +12,11 @@ import sys
 import os
 import gc
 import argparse
+from pathlib import Path
+
+# Add parent dir for klein_utils import
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from klein_utils import GenerationContext  # ENFORCED: Always save settings JSON
 
 import torch
 import torch.nn.functional as F
@@ -93,89 +98,90 @@ def main():
     setup_optimizations()
 
     device = torch.device("cuda")
-
-    total_vram = torch.cuda.get_device_properties(0).total_memory / 1e9
-    log.info(f"GPU: {torch.cuda.get_device_name(0)}")
-    log.info(f"VRAM: {total_vram:.1f}GB")
-    log.info(f"Frames: {args.frames}, Resolution: {args.width}x{args.height}")
-    log.info(f"Zoom: {args.zoom:.1%}, Strength: {args.strength:.0%}")
-
-    OUTPUT_DIR = "/workspace/outputs/frames_klein"
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-    # Load text2img pipeline for first frame
-    log.info(f"\nLoading Klein from {args.model_path}...")
-    pipe = FluxPipeline.from_pretrained(
-        args.model_path,
-        torch_dtype=torch.bfloat16,
-    )
-    pipe.enable_model_cpu_offload()
-    log.info("Pipeline loaded with CPU offload")
-
-    # Generator for reproducibility
-    generator = torch.Generator("cuda").manual_seed(args.seed)
-
-    frames = []
-    ref_image = None
-
-    log.info(f"\nGenerating {args.frames} frames...")
-
-    for i in tqdm(range(args.frames), desc="Klein Animation"):
-        if i == 0:
-            # First frame: text2img
-            image = pipe(
-                prompt=args.prompt,
-                width=args.width,
-                height=args.height,
-                num_inference_steps=4,
-                guidance_scale=1.0,
-                generator=generator,
-            ).images[0]
-            ref_image = image
-        else:
-            # Subsequent frames: zoom + img2img
-            prev_image = frames[-1]
-            zoomed = zoom_image(prev_image, args.zoom)
-
-            # Switch to img2img mode
-            image = pipe(
-                prompt=args.prompt,
-                image=zoomed,
-                width=args.width,
-                height=args.height,
-                num_inference_steps=4,
-                guidance_scale=1.0,
-                strength=args.strength,
-                generator=torch.Generator("cuda").manual_seed(args.seed),  # Same seed
-            ).images[0]
-
-            # Color coherence
-            image = match_color_lab(image, ref_image)
-
-            # Sharpen
-            image = image.filter(ImageFilter.UnsharpMask(radius=1, percent=50, threshold=2))
-
-        frames.append(image)
-        image.save(f"{OUTPUT_DIR}/frame_{i:04d}.png")
-
-        if i % 10 == 0:
-            alloc = torch.cuda.memory_allocated() / 1e9
-            log.info(f"  Frame {i}: VRAM {alloc:.2f}GB")
-
-        clear_memory()
-
-    # Create video
-    log.info("\nCreating video...")
     output_video = "/workspace/outputs/klein_animation.mp4"
-    subprocess.run([
-        "ffmpeg", "-y", "-framerate", "12",
-        "-i", f"{OUTPUT_DIR}/frame_%04d.png",
-        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18",
-        output_video
-    ], capture_output=True)
 
-    log.info(f"Done! Video: {output_video}")
-    log.info(f"Frames: {OUTPUT_DIR}/")
+    # ENFORCED: GenerationContext guarantees JSON is saved (even on crash)
+    with GenerationContext(output_video) as gen:
+        gen.update(
+            preset="diffusers_animation",
+            prompt=args.prompt,
+            model=args.model_path,
+            width=args.width,
+            height=args.height,
+            zoom=args.zoom,
+            strength=args.strength,
+            seed=args.seed,
+            steps=4,
+            guidance_scale=1.0,
+        )
+        gen.fps = 12.0
+
+        OUTPUT_DIR = "/workspace/outputs/frames_klein"
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+        # Load text2img pipeline for first frame
+        pipe = FluxPipeline.from_pretrained(
+            args.model_path,
+            torch_dtype=torch.bfloat16,
+        )
+        pipe.enable_model_cpu_offload()
+
+        # Generator for reproducibility
+        generator = torch.Generator("cuda").manual_seed(args.seed)
+
+        frames = []
+        ref_image = None
+
+        for i in tqdm(range(args.frames), desc="Klein Animation"):
+            if i == 0:
+                # First frame: text2img
+                image = pipe(
+                    prompt=args.prompt,
+                    width=args.width,
+                    height=args.height,
+                    num_inference_steps=4,
+                    guidance_scale=1.0,
+                    generator=generator,
+                ).images[0]
+                ref_image = image
+            else:
+                # Subsequent frames: zoom + img2img
+                prev_image = frames[-1]
+                zoomed = zoom_image(prev_image, args.zoom)
+
+                # Switch to img2img mode
+                image = pipe(
+                    prompt=args.prompt,
+                    image=zoomed,
+                    width=args.width,
+                    height=args.height,
+                    num_inference_steps=4,
+                    guidance_scale=1.0,
+                    strength=args.strength,
+                    generator=torch.Generator("cuda").manual_seed(args.seed),
+                ).images[0]
+
+                # Color coherence
+                image = match_color_lab(image, ref_image)
+
+                # Sharpen
+                image = image.filter(ImageFilter.UnsharpMask(radius=1, percent=50, threshold=2))
+
+            frames.append(image)
+            image.save(f"{OUTPUT_DIR}/frame_{i:04d}.png")
+
+            if i % 10 == 0:
+                clear_memory()
+
+        # Create video
+        subprocess.run([
+            "ffmpeg", "-y", "-framerate", "12",
+            "-i", f"{OUTPUT_DIR}/frame_%04d.png",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18",
+            output_video
+        ], capture_output=True)
+
+        gen.frames = frames
 
 
 if __name__ == "__main__":

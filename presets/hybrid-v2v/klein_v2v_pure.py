@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""Klein V2V Pure - True latent-guided img2img."""
+"""Klein V2V Pure - True latent-guided img2img with enforced JSON metadata."""
 import argparse
-from klein_utils import load_video, save_video, save_metadata, match_color_lab, get_pipeline, generate, clear_cuda, tqdm
+from klein_utils import (
+    load_video, match_color_lab, get_pipeline, generate, clear_cuda, tqdm,
+    GenerationContext  # ENFORCED: Always save settings JSON
+)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--input", "-i", required=True)
@@ -13,18 +16,29 @@ parser.add_argument("--seed", type=int, default=42)
 args = parser.parse_args()
 
 frames, fps = load_video(args.input, max_frames=args.max_frames)
-print(f"V2V Pure: {len(frames)} frames, strength={args.strength}")
 
-pipe = get_pipeline()
-output, anchor = [], None
+# ENFORCED: GenerationContext guarantees JSON is saved (even on crash)
+with GenerationContext(args.output) as gen:
+    gen.update(
+        preset="v2v_pure",
+        input=args.input,
+        prompt=args.prompt,
+        strength=args.strength,
+        seed=args.seed,
+        model="flux.2-klein-4b",
+        steps=4,
+    )
+    gen.fps = fps
 
-for i, frame in enumerate(tqdm(frames, desc="V2V")):
-    img = generate(pipe, frame, args.prompt, args.strength, args.seed)
-    anchor = img if i == 0 else anchor
-    output.append(img if i == 0 else match_color_lab(img, anchor))
-    if i % 20 == 0: clear_cuda()
+    pipe = get_pipeline()
+    output, anchor = [], None
 
-save_video(output, args.output, fps)
-save_metadata(args.output, preset="v2v_pure", input=args.input, prompt=args.prompt, 
-              strength=args.strength, seed=args.seed, frames=len(frames), fps=fps)
-print(f"Done: {args.output}")
+    for i, frame in enumerate(tqdm(frames, desc="V2V")):
+        img = generate(pipe, frame, args.prompt, args.strength, args.seed)
+        anchor = img if i == 0 else anchor
+        output.append(img if i == 0 else match_color_lab(img, anchor))
+        if i % 20 == 0:
+            clear_cuda()
+
+    gen.frames = output
+    gen.save_video()

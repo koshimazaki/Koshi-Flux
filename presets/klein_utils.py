@@ -1,9 +1,23 @@
 #!/usr/bin/env python3
-"""Shared utilities for Klein V2V scripts."""
+"""Shared utilities for Klein V2V scripts.
+
+IMPORTANT: All generations MUST use GenerationContext to enforce JSON metadata saving.
+This ensures every output has reproducible settings saved alongside it.
+
+Usage:
+    with GenerationContext("output.mp4", prompt="...", strength=0.8) as gen:
+        gen.set("model", "klein-4b")  # Add more params
+        # ... do generation ...
+        gen.frames = output_frames    # Set output
+    # JSON auto-saved on exit
+"""
 import sys
 import json
 from pathlib import Path
 from datetime import datetime
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from typing import Any
 
 # Auto-detect workspace (RunPod) vs local
 WORKSPACE = Path("/workspace") if Path("/workspace").exists() else Path.cwd()
@@ -19,7 +33,107 @@ import torch
 from PIL import Image
 from tqdm import tqdm
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
+
+
+# =============================================================================
+# ENFORCED GENERATION CONTEXT - Use this for ALL generations
+# =============================================================================
+
+@dataclass
+class GenerationContext:
+    """Enforced context manager that REQUIRES JSON metadata saving.
+
+    Every generation MUST use this. JSON is auto-saved on context exit.
+    Raises error if generation completes without saving.
+
+    Example:
+        with GenerationContext("/workspace/outputs/test.mp4") as gen:
+            gen.set("prompt", "cosmic nebula")
+            gen.set("model", "klein-4b")
+            gen.set("steps", 4)
+            gen.set("seed", 42)
+            # ... run generation ...
+            gen.frames = output_frames
+            gen.fps = 24.0
+        # JSON auto-saved to /workspace/outputs/test.json
+    """
+    output_path: str
+    frames: list = None
+    fps: float = 24.0
+    _params: dict = field(default_factory=dict)
+    _saved: bool = False
+
+    def __post_init__(self):
+        self._params = {
+            "timestamp": datetime.now().isoformat(),
+            "version": __version__,
+        }
+
+    def set(self, key: str, value: Any) -> "GenerationContext":
+        """Set a generation parameter. Chainable."""
+        self._params[key] = value
+        return self
+
+    def update(self, **kwargs) -> "GenerationContext":
+        """Set multiple parameters at once."""
+        self._params.update(kwargs)
+        return self
+
+    def __enter__(self) -> "GenerationContext":
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            # Error occurred - still save partial metadata for debugging
+            self._params["error"] = str(exc_val)
+            self._params["status"] = "failed"
+        else:
+            self._params["status"] = "completed"
+
+        # Always save JSON
+        self._save_json()
+        return False  # Don't suppress exceptions
+
+    def _save_json(self):
+        """Save metadata JSON alongside video."""
+        out_path = Path(self.output_path)
+        json_path = out_path.with_suffix(".json")
+
+        self._params["video"] = str(out_path)
+        self._params["frames"] = len(self.frames) if self.frames else 0
+        self._params["fps"] = self.fps
+
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(json_path, "w") as f:
+            json.dump(self._params, f, indent=2, default=str)
+
+        self._saved = True
+        print(f"[GenerationContext] Metadata saved: {json_path}")
+
+    def save_video(self, temp_name: str = "gen"):
+        """Save frames as video. Call this before exiting context."""
+        if not self.frames:
+            raise ValueError("No frames set! Assign gen.frames before saving.")
+        save_video(self.frames, self.output_path, self.fps, temp_name=temp_name)
+
+
+@contextmanager
+def generation(output_path: str, **initial_params):
+    """Functional version of GenerationContext.
+
+    Usage:
+        with generation("output.mp4", prompt="test", seed=42) as gen:
+            gen.set("model", "klein-4b")
+            # ... generate ...
+            gen.frames = frames
+    """
+    ctx = GenerationContext(output_path)
+    ctx.update(**initial_params)
+    try:
+        yield ctx
+    finally:
+        ctx.__exit__(None, None, None)
 
 
 def load_video(path: str, max_frames: int = None, resize: tuple = None) -> tuple:
@@ -43,8 +157,16 @@ def load_video(path: str, max_frames: int = None, resize: tuple = None) -> tuple
     return frames, fps
 
 
-def save_video(frames: list, path: str, fps: float, temp_name: str = "temp"):
-    """Save frames as MP4 video."""
+def save_video(frames: list, path: str, fps: float, temp_name: str = "temp", metadata: dict = None):
+    """Save frames as MP4 video with optional auto-JSON metadata.
+
+    Args:
+        frames: List of PIL Images
+        path: Output video path
+        fps: Frames per second
+        temp_name: Temp directory prefix
+        metadata: If provided, auto-saves JSON alongside video with generation params
+    """
     out_path = Path(path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     temp_dir = out_path.parent / f".{temp_name}_{out_path.stem}"
@@ -63,6 +185,21 @@ def save_video(frames: list, path: str, fps: float, temp_name: str = "temp"):
         for f in temp_dir.glob("*.png"):
             f.unlink()
         temp_dir.rmdir()
+
+    # Auto-save metadata JSON if provided
+    if metadata is not None:
+        meta = {
+            "timestamp": datetime.now().isoformat(),
+            "version": __version__,
+            "video": str(out_path),
+            "fps": fps,
+            "frames": len(frames),
+            **metadata
+        }
+        json_path = out_path.with_suffix(".json")
+        with open(json_path, "w") as f:
+            json.dump(meta, f, indent=2)
+        print(f"Metadata: {json_path}")
 
 
 def match_color_lab(img: Image.Image, ref: Image.Image) -> Image.Image:

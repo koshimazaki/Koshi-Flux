@@ -18,9 +18,9 @@ Usage:
 """
 import argparse
 from klein_utils import (
-    load_video, save_video, save_metadata,
-    match_color_lab, optical_flow, warp,
-    get_pipeline, clear_cuda
+    load_video, match_color_lab, optical_flow, warp,
+    get_pipeline, clear_cuda,
+    GenerationContext  # ENFORCED: Always save settings JSON
 )
 from tqdm import tqdm
 from flux_motion.shared import FluxParameterAdapter
@@ -70,77 +70,76 @@ def main():
     num_frames = len(frames)
     width, height = frames[0].size
 
-    tqdm.write(f"V2V Deforum: {num_frames} frames @ {width}x{height}")
-    tqdm.write(f"  Strength: {args.strength}")
-    tqdm.write(f"  Motion: zoom={args.zoom}, angle={args.angle}")
+    # ENFORCED: GenerationContext guarantees JSON is saved (even on crash)
+    with GenerationContext(args.output) as gen:
+        gen.update(
+            preset="v2v_deforum",
+            input=args.input,
+            prompt=args.prompt,
+            strength=args.strength,
+            init_from_input=args.init_from_input,
+            zoom=args.zoom,
+            angle=args.angle,
+            translation_x=args.translation_x,
+            translation_y=args.translation_y,
+            translation_z=args.translation_z,
+            seed=args.seed,
+            model="flux.2-klein-4b",
+            steps=4,
+        )
+        gen.fps = fps
 
-    # Parse motion schedules
-    param_adapter = FluxParameterAdapter()
-    motion_params = {
-        "zoom": args.zoom,
-        "angle": args.angle,
-        "translation_x": args.translation_x,
-        "translation_y": args.translation_y,
-        "translation_z": args.translation_z,
-        "prompts": {0: args.prompt},
-    }
-    motion_frames = param_adapter.convert_deforum_params(motion_params, num_frames)
+        # Parse motion schedules
+        param_adapter = FluxParameterAdapter()
+        motion_params = {
+            "zoom": args.zoom,
+            "angle": args.angle,
+            "translation_x": args.translation_x,
+            "translation_y": args.translation_y,
+            "translation_z": args.translation_z,
+            "prompts": {0: args.prompt},
+        }
+        motion_frames = param_adapter.convert_deforum_params(motion_params, num_frames)
 
-    pipe = get_pipeline()
-    output = []
-    prev_input = frames[0]
-    prev_gen = None
+        pipe = get_pipeline()
+        output = []
+        prev_input = frames[0]
+        prev_gen = None
 
-    for i, (frame, motion_frame) in enumerate(tqdm(
-        zip(frames, motion_frames), total=num_frames, desc="V2V Deforum"
-    )):
-        motion_dict = motion_frame.to_dict()
+        for i, (frame, motion_frame) in enumerate(tqdm(
+            zip(frames, motion_frames), total=num_frames, desc="V2V Deforum"
+        )):
+            motion_dict = motion_frame.to_dict()
 
-        if i == 0:
-            # First frame - higher strength for style transfer
-            init_strength = 0.7 if args.init_from_input else 0.95
-            img = generate_with_motion(
-                pipe, frame, args.prompt, init_strength, args.seed,
-                motion_dict, width, height
-            )
-        else:
-            # Video (Light) pixel ops: flow + warp
-            warped = warp(prev_gen, optical_flow(prev_input, frame))
+            if i == 0:
+                # First frame - higher strength for style transfer
+                init_strength = 0.7 if args.init_from_input else 0.95
+                img = generate_with_motion(
+                    pipe, frame, args.prompt, init_strength, args.seed,
+                    motion_dict, width, height
+                )
+            else:
+                # Video (Light) pixel ops: flow + warp
+                warped = warp(prev_gen, optical_flow(prev_input, frame))
 
-            # Generate with motion engine transforms
-            img = generate_with_motion(
-                pipe, warped, args.prompt, args.strength, args.seed,
-                motion_dict, width, height
-            )
+                # Generate with motion engine transforms
+                img = generate_with_motion(
+                    pipe, warped, args.prompt, args.strength, args.seed,
+                    motion_dict, width, height
+                )
 
-            # LAB color match to anchor
-            img = match_color_lab(img, output[0])
+                # LAB color match to anchor
+                img = match_color_lab(img, output[0])
 
-        output.append(img)
-        prev_input = frame
-        prev_gen = img
+            output.append(img)
+            prev_input = frame
+            prev_gen = img
 
-        if i % 20 == 0:
-            clear_cuda()
+            if i % 20 == 0:
+                clear_cuda()
 
-    save_video(output, args.output, fps)
-    save_metadata(
-        args.output,
-        preset="v2v_deforum",
-        input=args.input,
-        prompt=args.prompt,
-        strength=args.strength,
-        init_from_input=args.init_from_input,
-        zoom=args.zoom,
-        angle=args.angle,
-        translation_x=args.translation_x,
-        translation_y=args.translation_y,
-        translation_z=args.translation_z,
-        seed=args.seed,
-        frames=num_frames,
-        fps=fps,
-    )
-    tqdm.write(f"Done: {args.output}")
+        gen.frames = output
+        gen.save_video()
 
 
 if __name__ == "__main__":

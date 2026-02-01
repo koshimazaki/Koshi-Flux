@@ -32,6 +32,8 @@ sys.path.insert(0, os.path.join(PACKAGE_DIR, "flux2", "src"))
 sys.path.insert(0, os.path.join(PACKAGE_DIR, "Deforum2026", "flux", "src"))
 sys.path.insert(0, os.path.join(PACKAGE_DIR, "Deforum2026", "core", "src"))
 
+from klein_utils import GenerationContext  # ENFORCED: Always save settings JSON
+
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 log = logging.getLogger(__name__)
 
@@ -277,38 +279,50 @@ def main():
         resize=(args.width, args.height)
     )
 
-    # Load Deforum pipeline (native BFL SDK)
-    from flux_motion.flux2 import Flux2Pipeline
-
-    log.info("Loading Flux2Pipeline (native BFL SDK)...")
-    pipe = Flux2Pipeline(
-        model_name="flux.2-klein-4b",
-        device="cuda",
-        offload=True,
-        compile_model=True,
-    )
-    pipe.load_models()
-
-    # Process
-    log.info(f"\nMode: {args.mode}")
-    log.info(f"Prompt: {args.prompt}")
-    log.info(f"Strength: {args.strength}")
-
-    if args.mode == "v2v":
-        output = v2v_stylize(pipe, frames, args.prompt, args.strength, args.seed)
-    elif args.mode == "hybrid":
-        output = v2v_hybrid(pipe, frames, args.prompt, args.strength, args.blend, args.seed)
-    elif args.mode == "motion":
-        output = v2v_motion_transfer(pipe, frames, args.prompt, args.strength, args.seed)
-
-    # Save - use input video FPS unless overridden
     out_path = args.output or f"/workspace/outputs/klein_v2v_{args.mode}.mp4"
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
     output_fps = args.fps if args.fps else orig_fps
-    log.info(f"Output FPS: {output_fps:.1f} (input was {orig_fps:.1f})")
-    save_video(output, out_path, output_fps)
 
-    log.info(f"\nDone! {out_path}")
+    # ENFORCED: GenerationContext guarantees JSON is saved (even on crash)
+    with GenerationContext(out_path) as gen:
+        gen.update(
+            preset=f"v2v_full_{args.mode}",
+            input=args.input,
+            prompt=args.prompt,
+            mode=args.mode,
+            strength=args.strength,
+            blend=args.blend,
+            width=args.width,
+            height=args.height,
+            seed=args.seed,
+            model="flux.2-klein-4b",
+            steps=4,
+        )
+        gen.fps = output_fps
+
+        # Load Deforum pipeline (native BFL SDK)
+        from flux_motion.flux2 import Flux2Pipeline
+
+        pipe = Flux2Pipeline(
+            model_name="flux.2-klein-4b",
+            device="cuda",
+            offload=True,
+            compile_model=True,
+        )
+        pipe.load_models()
+
+        # Process
+        if args.mode == "v2v":
+            output = v2v_stylize(pipe, frames, args.prompt, args.strength, args.seed)
+        elif args.mode == "hybrid":
+            output = v2v_hybrid(pipe, frames, args.prompt, args.strength, args.blend, args.seed)
+        elif args.mode == "motion":
+            output = v2v_motion_transfer(pipe, frames, args.prompt, args.strength, args.seed)
+
+        # Save video
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        save_video(output, out_path, output_fps)
+
+        gen.frames = output
 
 
 if __name__ == "__main__":

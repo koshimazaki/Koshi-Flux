@@ -14,6 +14,10 @@ import argparse
 import sys
 from pathlib import Path
 
+# Add parent dir for klein_utils import
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from klein_utils import GenerationContext  # ENFORCED: Always save settings JSON
+
 import cv2
 import numpy as np
 import torch
@@ -251,53 +255,64 @@ def main():
     frames, fps = load_video(args.input, max_frames=args.max_frames)
     num_frames = len(frames)
 
-    tqdm.write(f"Native V2V: {num_frames} frames")
-    tqdm.write(f"  Model: {args.model}, Steps: {args.steps}, Strength: {args.strength}")
+    # ENFORCED: GenerationContext guarantees JSON is saved (even on crash)
+    with GenerationContext(args.output) as gen:
+        gen.update(
+            preset="native_v2v",
+            input=args.input,
+            prompt=args.prompt,
+            model=args.model,
+            strength=args.strength,
+            steps=args.steps,
+            guidance=args.guidance,
+            seed=args.seed,
+        )
+        gen.fps = fps
 
-    pipe = NativePipeline(model_name=args.model)
+        pipe = NativePipeline(model_name=args.model)
 
-    output = []
-    prev_input = frames[0]
-    prev_gen = None
-    anchor = None
+        output = []
+        prev_input = frames[0]
+        prev_gen = None
+        anchor = None
 
-    for i, frame in enumerate(tqdm(frames, desc="Native")):
-        if i == 0:
-            # First frame - higher strength
-            img = pipe.generate(
-                frame, args.prompt,
-                strength=0.7,
-                num_steps=args.steps,
-                guidance=args.guidance,
-                seed=args.seed
-            )
-            anchor = img
-        else:
-            # Warp previous generation
-            flow = optical_flow(prev_input, frame)
-            warped = warp(prev_gen, flow)
+        for i, frame in enumerate(tqdm(frames, desc="Native")):
+            if i == 0:
+                # First frame - higher strength
+                img = pipe.generate(
+                    frame, args.prompt,
+                    strength=0.7,
+                    num_steps=args.steps,
+                    guidance=args.guidance,
+                    seed=args.seed
+                )
+                anchor = img
+            else:
+                # Warp previous generation
+                flow = optical_flow(prev_input, frame)
+                warped = warp(prev_gen, flow)
 
-            # Generate
-            img = pipe.generate(
-                warped, args.prompt,
-                strength=args.strength,
-                num_steps=args.steps,
-                guidance=args.guidance,
-                seed=args.seed + i
-            )
+                # Generate
+                img = pipe.generate(
+                    warped, args.prompt,
+                    strength=args.strength,
+                    num_steps=args.steps,
+                    guidance=args.guidance,
+                    seed=args.seed + i
+                )
 
-            # Color match to anchor
-            img = match_color_lab(img, anchor)
+                # Color match to anchor
+                img = match_color_lab(img, anchor)
 
-        output.append(img)
-        prev_input = frame
-        prev_gen = img
+            output.append(img)
+            prev_input = frame
+            prev_gen = img
 
-        if i % 20 == 0:
-            torch.cuda.empty_cache()
+            if i % 20 == 0:
+                torch.cuda.empty_cache()
 
-    save_video(output, args.output, fps)
-    tqdm.write(f"Done: {args.output}")
+        gen.frames = output
+        save_video(output, args.output, fps)
 
 
 if __name__ == "__main__":
