@@ -251,8 +251,8 @@ def get_pipeline(model: str = "flux.2-klein-4b", offload: bool = True, compile: 
 
     Note: Requires flux2 SDK: pip install git+https://github.com/black-forest-labs/flux2.git
     """
-    from deforum_flux.flux2 import Flux2DeforumPipeline
-    return Flux2DeforumPipeline(model_name=model, offload=offload, compile_model=compile)
+    from flux_motion.flux2 import Flux2Pipeline
+    return Flux2Pipeline(model_name=model, offload=offload, compile_model=compile)
 
 
 def generate(pipe, frame: Image.Image, prompt: str, strength: float, seed: int) -> Image.Image:
