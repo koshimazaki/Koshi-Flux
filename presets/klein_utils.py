@@ -242,13 +242,29 @@ def warp(img: Image.Image, flow: np.ndarray) -> Image.Image:
 
 
 def get_pipeline(model: str = "flux.2-klein-4b", offload: bool = True, compile: bool = True):
-    """Load Klein pipeline."""
-    from flux_motion.flux2 import Flux2Pipeline
-    return Flux2Pipeline(model_name=model, offload=offload, compile_model=compile)
+    """Load Klein pipeline using native Deforum SDK (supports real img2img strength).
+
+    Args:
+        model: Model name (flux.2-klein-4b or flux.2-klein-9b)
+        offload: Enable CPU offload for lower VRAM
+        compile: Enable torch.compile (faster but slower startup)
+
+    Note: Requires flux2 SDK: pip install git+https://github.com/black-forest-labs/flux2.git
+    """
+    from deforum_flux.flux2 import Flux2DeforumPipeline
+    return Flux2DeforumPipeline(model_name=model, offload=offload, compile_model=compile)
 
 
 def generate(pipe, frame: Image.Image, prompt: str, strength: float, seed: int) -> Image.Image:
-    """Generate single frame."""
+    """Generate single frame with real img2img strength control.
+
+    Args:
+        pipe: Flux2DeforumPipeline instance
+        frame: Input frame
+        prompt: Generation prompt
+        strength: 0.0-1.0, lower = more video preserved (0.1 = 90% video, 0.3 = 70% video)
+        seed: Random seed for reproducibility
+    """
     latent = pipe._encode_to_latent(frame)
     img, _ = pipe._generate_motion_frame(
         prev_latent=latent, prompt=prompt, motion_params={},
