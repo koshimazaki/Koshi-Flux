@@ -203,7 +203,10 @@ def save_video(frames: list, path: str, fps: float, temp_name: str = "temp", met
 
 
 def match_color_lab(img: Image.Image, ref: Image.Image) -> Image.Image:
-    """Match color distribution using LAB space."""
+    """Match color distribution using LAB space (DEPRECATED - use match_color_latent).
+
+    Note: Pixel LAB can wash out colors. Prefer match_color_latent for vibrant results.
+    """
     img_lab = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2LAB).astype(np.float32)
     ref_lab = cv2.cvtColor(np.array(ref), cv2.COLOR_RGB2LAB).astype(np.float32)
     for c in range(3):
@@ -212,6 +215,59 @@ def match_color_lab(img: Image.Image, ref: Image.Image) -> Image.Image:
         img_lab[:, :, c] = (img_lab[:, :, c] - i_mean) * (r_std / i_std) + r_mean
     result = cv2.cvtColor(np.clip(img_lab, 0, 255).astype(np.uint8), cv2.COLOR_LAB2RGB)
     return Image.fromarray(result)
+
+
+def match_color_latent(
+    current_latent: torch.Tensor,
+    reference_latent: torch.Tensor,
+    color_channels: tuple = (32, 64),
+    blend: float = 0.7,
+) -> torch.Tensor:
+    """Match color statistics in 128-channel latent space (RECOMMENDED).
+
+    Unlike pixel LAB which shifts entire histogram and washes out colors,
+    this only adjusts mean/std of color channels while preserving structure.
+
+    FLUX.2 channel semantics (128 channels):
+        0-31:   Structure (preserved)
+        32-47:  Color palette (matched)
+        48-63:  Lighting/atmosphere (matched)
+        64-95:  Texture/detail (preserved)
+        96-127: Context/transitions (preserved)
+
+    Args:
+        current_latent: Current frame latent (B, 128, H, W)
+        reference_latent: Anchor frame latent (B, 128, H, W)
+        color_channels: Channel range for color matching (start, end)
+        blend: 0.0 = no match, 1.0 = full match (0.7 recommended)
+
+    Returns:
+        Color-matched latent with structure preserved
+    """
+    if blend <= 0:
+        return current_latent
+
+    result = current_latent.clone()
+    start, end = color_channels
+
+    # Extract color channel slices
+    curr_color = current_latent[:, start:end]
+    ref_color = reference_latent[:, start:end]
+
+    # Compute per-channel statistics
+    curr_mean = curr_color.mean(dim=(2, 3), keepdim=True)
+    curr_std = curr_color.std(dim=(2, 3), keepdim=True) + 1e-6
+    ref_mean = ref_color.mean(dim=(2, 3), keepdim=True)
+    ref_std = ref_color.std(dim=(2, 3), keepdim=True) + 1e-6
+
+    # Normalize to zero mean, unit variance, then rescale to reference
+    normalized = (curr_color - curr_mean) / curr_std
+    matched = normalized * ref_std + ref_mean
+
+    # Blend matched with original (allows partial matching)
+    result[:, start:end] = curr_color * (1 - blend) + matched * blend
+
+    return result
 
 
 def blend(img1: Image.Image, img2: Image.Image, alpha: float) -> Image.Image:
