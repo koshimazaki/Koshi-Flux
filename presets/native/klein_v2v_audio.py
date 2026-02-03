@@ -3,20 +3,24 @@
 
 Maps audio features to generation parameters:
 - Kick/Bass → Zoom (pulse on beat)
-- Snare → Strength (style intensity on snare hits)
+- Snare/Mid → Strength (style intensity on snare hits)
+- Kick threshold → Prompt toggle (scene change)
+
+Uses flux_motion.audio.extractor for robust audio analysis.
 
 Usage:
     python klein_v2v_audio.py -i video.mp4 -a audio.wav -o output.mp4 -p "prompt"
 """
 import argparse
+import sys
 import numpy as np
 from pathlib import Path
 
-try:
-    import librosa
-    HAS_LIBROSA = True
-except ImportError:
-    HAS_LIBROSA = False
+# Add flux_motion to path
+SCRIPT_DIR = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(SCRIPT_DIR / "flux/src"))
+
+from flux_motion.audio.extractor import AudioFeatureExtractor
 
 from klein_utils import (
     load_video, blend, get_pipeline, clear_cuda, tqdm, Image,
@@ -37,52 +41,9 @@ parser.add_argument("--strength-max", type=float, default=0.40, help="Max streng
 parser.add_argument("--zoom-min", type=float, default=1.0, help="Base zoom")
 parser.add_argument("--zoom-max", type=float, default=1.08, help="Max zoom on kick")
 parser.add_argument("--prev-blend", type=float, default=0.3)
-parser.add_argument("--smooth", type=float, default=0.3, help="Audio smoothing")
 parser.add_argument("--max-frames", "-n", type=int)
 parser.add_argument("--seed", type=int, default=42)
 args = parser.parse_args()
-
-
-def load_audio_features(audio_path: str, num_frames: int, fps: float) -> dict:
-    """Extract kick and snare energy per frame from audio."""
-    if not HAS_LIBROSA:
-        return {
-            'kick': np.random.rand(num_frames) * 0.5,
-            'snare': np.random.rand(num_frames) * 0.5,
-        }
-
-    y, sr = librosa.load(audio_path, sr=22050)
-    duration = len(y) / sr
-    frame_times = np.linspace(0, duration, num_frames)
-
-    D = np.abs(librosa.stft(y))
-    freqs = librosa.fft_frequencies(sr=sr)
-    times = librosa.times_like(D, sr=sr)
-
-    kick_mask = (freqs >= 60) & (freqs <= 150)
-    snare_mask = (freqs >= 150) & (freqs <= 400)
-
-    kick_energy = D[kick_mask, :].mean(axis=0)
-    snare_energy = D[snare_mask, :].mean(axis=0)
-
-    kick_energy = (kick_energy - kick_energy.min()) / (kick_energy.max() - kick_energy.min() + 1e-6)
-    snare_energy = (snare_energy - snare_energy.min()) / (snare_energy.max() - snare_energy.min() + 1e-6)
-
-    kick_interp = np.interp(frame_times, times, kick_energy)
-    snare_interp = np.interp(frame_times, times, snare_energy)
-
-    return {'kick': kick_interp, 'snare': snare_interp}
-
-
-def smooth_signal(signal: np.ndarray, alpha: float) -> np.ndarray:
-    """Exponential moving average smoothing."""
-    if alpha <= 0:
-        return signal
-    smoothed = np.zeros_like(signal)
-    smoothed[0] = signal[0]
-    for i in range(1, len(signal)):
-        smoothed[i] = alpha * smoothed[i-1] + (1 - alpha) * signal[i]
-    return smoothed
 
 
 def apply_zoom(img: Image.Image, zoom: float) -> Image.Image:
@@ -101,9 +62,13 @@ def apply_zoom(img: Image.Image, zoom: float) -> Image.Image:
 frames, fps = load_video(args.input, max_frames=args.max_frames)
 num_frames = len(frames)
 
-audio_features = load_audio_features(args.audio, num_frames, fps)
-kick = smooth_signal(audio_features['kick'], args.smooth)
-snare = smooth_signal(audio_features['snare'], args.smooth)
+# Extract audio features using flux_motion extractor
+extractor = AudioFeatureExtractor(normalize=True, smooth_window=3)
+audio = extractor.extract(args.audio, fps=fps, duration=num_frames/fps)
+
+# Map features: bass → kick/zoom, mid → snare/strength
+kick = audio.bass[:num_frames]
+snare = audio.mid[:num_frames]
 
 with GenerationContext(args.output) as gen:
     gen.update(
@@ -118,7 +83,7 @@ with GenerationContext(args.output) as gen:
         zoom_min=args.zoom_min,
         zoom_max=args.zoom_max,
         prev_blend=args.prev_blend,
-        smooth=args.smooth,
+        tempo=audio.tempo,
         seed=args.seed,
         model="flux.2-klein-4b",
         steps=4,
