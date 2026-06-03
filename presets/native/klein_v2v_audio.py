@@ -182,6 +182,9 @@ with GenerationContext(args.output) as gen:
     gen.audio = args.audio
 
     pipe = get_pipeline(lora=args.lora, lora_strength=args.lora_strength)
+    # Record whether the LoRA actually bound (native flux2 DiT may skip it),
+    # so the settings JSON doesn't imply a LoRA was applied when it wasn't.
+    gen.set("lora_applied", getattr(pipe, "_lora_manager", None) is not None)
     output = []
     prev_gen = None
     anchor_latent = None
