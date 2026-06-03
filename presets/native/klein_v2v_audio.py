@@ -85,6 +85,10 @@ parser.add_argument(
 parser.add_argument("--prev-blend", type=float, default=0.3)
 parser.add_argument("--max-frames", "-n", type=int)
 parser.add_argument("--seed", type=int, default=42)
+parser.add_argument("--lora", help="LoRA path or HF repo to apply (e.g. cyber-flowers)")
+parser.add_argument(
+    "--lora-strength", type=float, default=0.8, help="LoRA strength (0.0-2.0)"
+)
 args = parser.parse_args()
 
 
@@ -169,12 +173,15 @@ with GenerationContext(args.output) as gen:
         prev_blend=args.prev_blend,
         tempo=tracks.meta.get("tempo"),
         seed=args.seed,
+        lora=args.lora,
+        lora_strength=args.lora_strength,
         model="flux.2-klein-4b",
         steps=4,
     )
     gen.fps = fps
+    gen.audio = args.audio
 
-    pipe = get_pipeline()
+    pipe = get_pipeline(lora=args.lora, lora_strength=args.lora_strength)
     output = []
     prev_gen = None
     anchor_latent = None

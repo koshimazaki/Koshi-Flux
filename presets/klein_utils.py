@@ -61,6 +61,7 @@ class GenerationContext:
     output_path: str
     frames: list = None
     fps: float = 24.0
+    audio: str = None  # Optional audio track to mux onto the render
     _params: dict = field(default_factory=dict)
     _saved: bool = False
 
@@ -115,7 +116,7 @@ class GenerationContext:
         """Save frames as video. Call this before exiting context."""
         if not self.frames:
             raise ValueError("No frames set! Assign gen.frames before saving.")
-        save_video(self.frames, self.output_path, self.fps, temp_name=temp_name)
+        save_video(self.frames, self.output_path, self.fps, temp_name=temp_name, audio=self.audio)
 
 
 @contextmanager
@@ -157,7 +158,7 @@ def load_video(path: str, max_frames: int = None, resize: tuple = None) -> tuple
     return frames, fps
 
 
-def save_video(frames: list, path: str, fps: float, temp_name: str = "temp", metadata: dict = None):
+def save_video(frames: list, path: str, fps: float, temp_name: str = "temp", metadata: dict = None, audio: str = None):
     """Save frames as MP4 video with optional auto-JSON metadata.
 
     Args:
@@ -166,6 +167,8 @@ def save_video(frames: list, path: str, fps: float, temp_name: str = "temp", met
         fps: Frames per second
         temp_name: Temp directory prefix
         metadata: If provided, auto-saves JSON alongside video with generation params
+        audio: If provided and the file exists, mux this audio track onto the
+            render (keeps motion in sync with the source track). None = silent.
     """
     out_path = Path(path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -174,12 +177,19 @@ def save_video(frames: list, path: str, fps: float, temp_name: str = "temp", met
     try:
         for i, f in enumerate(frames):
             f.save(temp_dir / f"frame_{i:05d}.png")
+        has_audio = bool(audio) and Path(audio).is_file()
         cmd = [
             "ffmpeg", "-y", "-framerate", str(fps),
             "-i", str(temp_dir / "frame_%05d.png"),
-            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18",
-            str(out_path)
         ]
+        if has_audio:
+            cmd += ["-i", str(audio)]
+        cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18"]
+        if has_audio:
+            # Lay the source track back on so motion stays synced to the audio.
+            cmd += ["-c:a", "aac", "-b:a", "192k",
+                    "-map", "0:v:0", "-map", "1:a:0", "-shortest"]
+        cmd += [str(out_path)]
         subprocess.run(cmd, capture_output=True, check=True)
     finally:
         for f in temp_dir.glob("*.png"):
@@ -297,18 +307,61 @@ def warp(img: Image.Image, flow: np.ndarray) -> Image.Image:
     return Image.fromarray(warped)
 
 
-def get_pipeline(model: str = "flux.2-klein-4b", offload: bool = True, compile: bool = True):
+def apply_lora(pipe, lora_path: str = None, strength: float = 0.8):
+    """Best-effort LoRA application onto a Klein pipeline (infra hook).
+
+    When ``lora_path`` is set, ensure the pipeline weights are loaded and try the
+    diffusers LoRA path via KleinLoRAManager. Flux2Pipeline currently runs a native
+    flux2 DiT (only the VAE is diffusers), so it may not expose ``load_lora_weights``
+    yet; in that case we log a clear warning and skip rather than fail the run.
+
+    Returns the KleinLoRAManager if a LoRA was applied, else None.
+    """
+    if not lora_path:
+        return None
+    try:
+        if hasattr(pipe, "load_models") and not getattr(pipe, "_loaded", True):
+            pipe.load_models()
+    except Exception as exc:  # pragma: no cover - depends on GPU/model
+        print(f"[lora] could not load pipeline before LoRA: {exc}")
+    if not hasattr(pipe, "load_lora_weights"):
+        print(
+            "[lora] LoRA requested but this Flux2Pipeline exposes no diffusers "
+            "`load_lora_weights` hook yet (native flux2 DiT). Skipping LoRA apply. "
+            "Add transformer-level support in flux_motion/flux2/lora.py to enable it."
+        )
+        return None
+    from flux_motion.flux2.lora import KleinLoRAManager
+    manager = KleinLoRAManager(pipe, backend="diffusers")
+    manager.load(lora_path, strength=strength)
+    print(f"[lora] applied {lora_path} (strength={strength})")
+    return manager
+
+
+def get_pipeline(
+    model: str = "flux.2-klein-4b",
+    offload: bool = True,
+    compile: bool = True,
+    lora: str = None,
+    lora_strength: float = 0.8,
+):
     """Load Klein pipeline using native Deforum SDK (supports real img2img strength).
 
     Args:
         model: Model name (flux.2-klein-4b or flux.2-klein-9b)
         offload: Enable CPU offload for lower VRAM
         compile: Enable torch.compile (faster but slower startup)
+        lora: Optional LoRA path/HF repo to apply (infra hook; see apply_lora)
+        lora_strength: LoRA strength (0.0-2.0)
 
     Note: Requires flux2 SDK: pip install git+https://github.com/black-forest-labs/flux2.git
     """
     from flux_motion.flux2 import Flux2Pipeline
-    return Flux2Pipeline(model_name=model, offload=offload, compile_model=compile)
+    pipe = Flux2Pipeline(model_name=model, offload=offload, compile_model=compile)
+    manager = apply_lora(pipe, lora, lora_strength)
+    if manager is not None:
+        pipe._lora_manager = manager
+    return pipe
 
 
 def generate(pipe, frame: Image.Image, prompt: str, strength: float, seed: int) -> Image.Image:
