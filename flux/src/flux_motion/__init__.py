@@ -98,8 +98,9 @@ from flux_motion.bridge import (
 # API (optional - requires fastapi, uvicorn)
 try:
     from flux_motion.api import app as api_app
+
     _API_AVAILABLE = True
-except ImportError:
+except Exception:
     _API_AVAILABLE = False
 
 # Audio feature extraction (optional - requires librosa)
@@ -112,7 +113,17 @@ try:
         MappingConfig,
         FeatureMapping,
         DEFAULT_MAPPINGS,
+        AudioMotionResult,
+        FeatureTracks,
+        build_audio_motion_schedule,
+        tracks_from_analysis_file,
+        tracks_from_analysis_json,
+        tracks_from_audio_features,
+        tracks_from_audio_file,
+        tracks_from_video,
+        tracks_from_waveform,
     )
+
     _AUDIO_AVAILABLE = True
 except ImportError:
     _AUDIO_AVAILABLE = False
@@ -177,12 +188,23 @@ if _API_AVAILABLE:
 
 # Add audio exports if available
 if _AUDIO_AVAILABLE:
-    __all__.extend([
-        "AudioFeatureExtractor",
-        "AudioFeatures",
-        "ScheduleGenerator",
-        "ParseqSchedule",
-        "MappingConfig",
-        "FeatureMapping",
-        "DEFAULT_MAPPINGS",
-    ])
+    __all__.extend(
+        [
+            "AudioFeatureExtractor",
+            "AudioFeatures",
+            "ScheduleGenerator",
+            "ParseqSchedule",
+            "MappingConfig",
+            "FeatureMapping",
+            "DEFAULT_MAPPINGS",
+            "AudioMotionResult",
+            "FeatureTracks",
+            "build_audio_motion_schedule",
+            "tracks_from_analysis_file",
+            "tracks_from_analysis_json",
+            "tracks_from_audio_features",
+            "tracks_from_audio_file",
+            "tracks_from_video",
+            "tracks_from_waveform",
+        ]
+    )
