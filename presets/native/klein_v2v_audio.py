@@ -89,6 +89,13 @@ parser.add_argument("--lora", help="LoRA path or HF repo to apply (e.g. cyber-fl
 parser.add_argument(
     "--lora-strength", type=float, default=0.8, help="LoRA strength (0.0-2.0)"
 )
+parser.add_argument(
+    "--lora-backend",
+    choices=["auto", "diffusers", "native"],
+    default="auto",
+    help="How to bind the LoRA: 'native' merges into the flux2 DiT weights; "
+    "'diffusers' needs a diffusers Klein pipeline; 'auto' picks per pipeline.",
+)
 args = parser.parse_args()
 
 
@@ -175,16 +182,28 @@ with GenerationContext(args.output) as gen:
         seed=args.seed,
         lora=args.lora,
         lora_strength=args.lora_strength,
+        lora_backend=args.lora_backend,
         model="flux.2-klein-4b",
         steps=4,
     )
     gen.fps = fps
     gen.audio = args.audio
 
-    pipe = get_pipeline(lora=args.lora, lora_strength=args.lora_strength)
-    # Record whether the LoRA actually bound (native flux2 DiT may skip it),
-    # so the settings JSON doesn't imply a LoRA was applied when it wasn't.
-    gen.set("lora_applied", getattr(pipe, "_lora_manager", None) is not None)
+    pipe = get_pipeline(
+        lora=args.lora,
+        lora_strength=args.lora_strength,
+        lora_backend=args.lora_backend,
+    )
+    # Record whether the LoRA actually bound, and how, so the settings JSON never
+    # claims a LoRA was applied when it wasn't (AGENTS.md accuracy guardrail).
+    lora_manager = getattr(pipe, "_lora_manager", None)
+    gen.set("lora_applied", lora_manager is not None)
+    if lora_manager is not None:
+        loaded = lora_manager.list_loaded()
+        gen.set("lora_resolved_backend", lora_manager.backend)
+        if loaded:
+            gen.set("lora_modules_matched", loaded[0].matched)
+            gen.set("lora_modules_total", loaded[0].total)
     output = []
     prev_gen = None
     anchor_latent = None

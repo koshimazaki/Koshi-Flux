@@ -307,34 +307,80 @@ def warp(img: Image.Image, flow: np.ndarray) -> Image.Image:
     return Image.fromarray(warped)
 
 
-def apply_lora(pipe, lora_path: str = None, strength: float = 0.8):
-    """Best-effort LoRA application onto a Klein pipeline (infra hook).
+def apply_lora(
+    pipe,
+    lora_path: str = None,
+    strength: float = 0.8,
+    lora_backend: str = "auto",
+):
+    """Apply a LoRA onto a Klein pipeline via a backend selector.
 
-    When ``lora_path`` is set, ensure the pipeline weights are loaded and try the
-    diffusers LoRA path via KleinLoRAManager. Flux2Pipeline currently runs a native
-    flux2 DiT (only the VAE is diffusers), so it may not expose ``load_lora_weights``
-    yet; in that case we log a clear warning and skip rather than fail the run.
+    Backends:
+        - "auto": use diffusers if the pipe exposes ``load_lora_weights``, else
+          fall back to the native flux2 DiT merge.
+        - "diffusers": require a diffusers ``load_lora_weights`` hook (errors if
+          absent rather than silently skipping).
+        - "native": merge the LoRA directly into the native flux2 DiT weights
+          (``W' = W + scale * B @ A``). Works with the standard Flux2Pipeline.
 
-    Returns the KleinLoRAManager if a LoRA was applied, else None.
+    "No LoRA" (``lora_path`` falsy) returns None and leaves the pipe untouched.
+
+    Args:
+        pipe: A Flux2Pipeline (native) or a diffusers Klein pipeline.
+        lora_path: LoRA path / HF repo (native requires a local .safetensors).
+        strength: LoRA strength (0.0-2.0).
+        lora_backend: "auto" | "diffusers" | "native".
+
+    Returns:
+        The KleinLoRAManager if a LoRA was applied, else None.
+
+    Raises:
+        ValueError: If ``lora_backend`` is unknown, or "diffusers" is requested
+            on a pipe that has no ``load_lora_weights`` hook.
     """
     if not lora_path:
         return None
+    if lora_backend not in ("auto", "diffusers", "native"):
+        raise ValueError(
+            f"Unknown lora_backend: {lora_backend!r} "
+            "(expected 'auto', 'diffusers', or 'native')"
+        )
+
+    # Ensure model weights exist before we touch them (native merge needs them).
     try:
         if hasattr(pipe, "load_models") and not getattr(pipe, "_loaded", True):
             pipe.load_models()
     except Exception as exc:  # pragma: no cover - depends on GPU/model
         print(f"[lora] could not load pipeline before LoRA: {exc}")
-    if not hasattr(pipe, "load_lora_weights"):
-        print(
-            "[lora] LoRA requested but this Flux2Pipeline exposes no diffusers "
-            "`load_lora_weights` hook yet (native flux2 DiT). Skipping LoRA apply. "
-            "Add transformer-level support in flux_motion/flux2/lora.py to enable it."
+
+    has_diffusers_hook = hasattr(pipe, "load_lora_weights")
+    resolved = lora_backend
+    if resolved == "auto":
+        resolved = "diffusers" if has_diffusers_hook else "native"
+
+    # Validate the explicit diffusers request before importing anything heavy.
+    if resolved == "diffusers" and not has_diffusers_hook:
+        raise ValueError(
+            "lora_backend='diffusers' but this pipeline exposes no "
+            "`load_lora_weights` hook (native flux2 DiT). Use "
+            "lora_backend='native' (or 'auto') for the native merge."
         )
-        return None
+
     from flux_motion.flux2.lora import KleinLoRAManager
-    manager = KleinLoRAManager(pipe, backend="diffusers")
-    manager.load(lora_path, strength=strength)
-    print(f"[lora] applied {lora_path} (strength={strength})")
+
+    if resolved == "diffusers":
+        manager = KleinLoRAManager(pipe, backend="diffusers")
+        manager.load(lora_path, strength=strength)
+        print(f"[lora] applied {lora_path} via diffusers (strength={strength})")
+        return manager
+
+    # Native merge path.
+    manager = KleinLoRAManager(pipe, backend="native")
+    info = manager.load(lora_path, strength=strength)
+    print(
+        f"[lora] merged {lora_path} into native flux2 DiT "
+        f"(strength={strength}, matched {info.matched}/{info.total} modules)"
+    )
     return manager
 
 
@@ -344,6 +390,7 @@ def get_pipeline(
     compile: bool = True,
     lora: str = None,
     lora_strength: float = 0.8,
+    lora_backend: str = "auto",
 ):
     """Load Klein pipeline using native Deforum SDK (supports real img2img strength).
 
@@ -351,14 +398,99 @@ def get_pipeline(
         model: Model name (flux.2-klein-4b or flux.2-klein-9b)
         offload: Enable CPU offload for lower VRAM
         compile: Enable torch.compile (faster but slower startup)
-        lora: Optional LoRA path/HF repo to apply (infra hook; see apply_lora)
+        lora: Optional LoRA path/HF repo to apply (see apply_lora)
         lora_strength: LoRA strength (0.0-2.0)
+        lora_backend: "auto" | "diffusers" | "native" (see apply_lora). For the
+            standard native Flux2Pipeline, "auto" resolves to "native".
 
     Note: Requires flux2 SDK: pip install git+https://github.com/black-forest-labs/flux2.git
     """
     from flux_motion.flux2 import Flux2Pipeline
     pipe = Flux2Pipeline(model_name=model, offload=offload, compile_model=compile)
-    manager = apply_lora(pipe, lora, lora_strength)
+    manager = apply_lora(pipe, lora, lora_strength, lora_backend=lora_backend)
+    if manager is not None:
+        pipe._lora_manager = manager
+    return pipe
+
+
+# Diffusers pipeline class names that would expose a FLUX.2/Klein DiT with a
+# native ``load_lora_weights`` hook. Probed dynamically so this auto-enables if a
+# future diffusers ships Klein support (today none of these exist upstream).
+_DIFFUSERS_KLEIN_CANDIDATES = (
+    "Flux2Pipeline",
+    "Flux2KleinPipeline",
+    "FluxKleinPipeline",
+    "Flux2Img2ImgPipeline",
+)
+
+
+def get_diffusers_klein_pipeline(
+    repo_id: str = "black-forest-labs/FLUX.2-klein-4B",
+    lora: str = None,
+    lora_strength: float = 0.8,
+    torch_dtype=None,
+    device: str = "cuda",
+):
+    """Load a *diffusers* FLUX.2/Klein pipeline and bind a LoRA end-to-end.
+
+    This is the Path-A loader: it returns a diffusers pipeline so
+    ``KleinLoRAManager(backend="diffusers").load(...)`` (via :func:`apply_lora`)
+    binds the LoRA through diffusers' PEFT integration.
+
+    IMPORTANT: As of this writing diffusers does NOT ship a FLUX.2/Klein DiT
+    pipeline (only the Klein VAE is loadable via ``AutoencoderKL``; the DiT runs
+    through the native BFL ``flux2`` SDK - see ``Flux2Pipeline``). This function
+    therefore probes diffusers for a Klein/FLUX.2 pipeline class and raises a
+    clear, actionable error if none is present, instead of faking it. It will
+    start working automatically once such a class lands upstream.
+
+    Args:
+        repo_id: HuggingFace repo for the Klein pipeline weights.
+        lora: Optional LoRA path / HF repo to bind via the diffusers backend.
+        lora_strength: LoRA strength (0.0-2.0).
+        torch_dtype: Torch dtype (defaults to bfloat16).
+        device: Device to move the pipeline to.
+
+    Returns:
+        The diffusers pipeline (with ``_lora_manager`` set if a LoRA was bound).
+
+    Raises:
+        ImportError: If diffusers is missing/unimportable, naming the dep.
+        NotImplementedError: If diffusers has no FLUX.2/Klein pipeline class.
+    """
+    try:
+        import diffusers
+    except Exception as exc:  # ImportError or transitive import failure
+        raise ImportError(
+            "Path A needs a working `diffusers` install with FLUX.2/Klein "
+            f"support. Importing diffusers failed: {exc}. Install/repair with: "
+            "pip install -U 'diffusers>=0.36' 'huggingface_hub>=0.26' transformers"
+        ) from exc
+
+    pipe_cls = next(
+        (getattr(diffusers, n) for n in _DIFFUSERS_KLEIN_CANDIDATES
+         if hasattr(diffusers, n)),
+        None,
+    )
+    if pipe_cls is None:
+        raise NotImplementedError(
+            "diffusers "
+            f"{getattr(diffusers, '__version__', '?')} has no FLUX.2/Klein DiT "
+            "pipeline (looked for: "
+            f"{', '.join(_DIFFUSERS_KLEIN_CANDIDATES)}). Klein's DiT currently "
+            "runs only through the native BFL `flux2` SDK, so use the native "
+            "backend instead: get_pipeline(..., lora=..., lora_backend='native') "
+            "or `klein_v2v_audio.py --lora-backend native`. Re-run Path A once "
+            "diffusers ships a FLUX.2/Klein pipeline class upstream."
+        )
+
+    if torch_dtype is None:
+        torch_dtype = torch.bfloat16
+
+    pipe = pipe_cls.from_pretrained(repo_id, torch_dtype=torch_dtype)
+    pipe = pipe.to(device)
+
+    manager = apply_lora(pipe, lora, lora_strength, lora_backend="diffusers")
     if manager is not None:
         pipe._lora_manager = manager
     return pipe

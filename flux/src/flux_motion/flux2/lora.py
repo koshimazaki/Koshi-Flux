@@ -13,9 +13,9 @@ Usage:
     lora_manager.load("path/to/lora", strength=1.0)
 """
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Union
-from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,8 @@ class LoRAInfo:
     backend: str
     adapter_name: str = ""  # Track actual adapter name for diffusers
     fused: bool = False
+    matched: int = 0  # Native: number of LoRA modules merged into the model
+    total: int = 0    # Native: total LoRA modules found in the file
 
 
 class KleinLoRAManager:
@@ -86,6 +88,10 @@ class KleinLoRAManager:
         self.pipe = pipe_or_model
         self.backend = backend
         self.loaded_loras: Dict[str, LoRAInfo] = {}
+        # Native merge bookkeeping: name -> {"backups", "applied", "strength"}.
+        # backups = clones of original weights (for exact restore), applied =
+        # the delta tensors actually added (cast to param dtype/device).
+        self._native_state: Dict[str, dict] = {}
 
         logger.info(f"KleinLoRAManager initialized (backend={backend})")
 
@@ -176,24 +182,131 @@ class KleinLoRAManager:
             logger.error(f"Failed to load LoRA {lora_path}: {e}")
             raise
 
+    def _resolve_native_module(self):
+        """Return the underlying ``nn.Module`` to merge LoRA weights into.
+
+        Accepts either a raw model or a ``Flux2Pipeline``. For a pipeline we
+        ensure weights are loaded (``load_models``) and return ``_model``.
+
+        Raises:
+            RuntimeError: If no ``nn.Module`` with parameters can be located.
+        """
+        target = self.pipe
+        # A Flux2Pipeline lazily loads its DiT; force it before merging.
+        if hasattr(target, "load_models") and not getattr(target, "_loaded", False):
+            target.load_models()
+        # Prefer the explicit native DiT attribute, then the public property.
+        module = getattr(target, "_model", None)
+        if module is None:
+            module = getattr(target, "model", None)
+        if module is None and hasattr(target, "named_parameters"):
+            module = target  # target itself is the model
+        if module is None or not hasattr(module, "named_parameters"):
+            raise RuntimeError(
+                "Could not locate a native nn.Module to merge the LoRA into. "
+                "Expected the pipeline to expose `_model`/`model` or to be an "
+                "nn.Module itself."
+            )
+        return module
+
+    def _read_lora_file(self, lora_path: str) -> dict:
+        """Load a local ``.safetensors`` LoRA into a flat tensor dict.
+
+        Args:
+            lora_path: Path to a local ``.safetensors`` file.
+
+        Raises:
+            RuntimeError: If safetensors is unavailable.
+            FileNotFoundError: If the path is not a local ``.safetensors`` file.
+                Native merge needs raw tensors, so HF-repo / directory inputs are
+                not auto-resolved here (use the diffusers backend for those).
+        """
+        if not SAFETENSORS_AVAILABLE:
+            raise RuntimeError(
+                "safetensors is required for native LoRA merge. "
+                "Install with: pip install safetensors"
+            )
+        path = Path(lora_path)
+        if not (path.is_file() and path.suffix == ".safetensors"):
+            raise FileNotFoundError(
+                f"Native LoRA merge expects a local .safetensors file, got: "
+                f"{lora_path}. For HuggingFace repos or directories use "
+                f"backend='diffusers'."
+            )
+        return load_file(str(path))
+
     def _load_native(
         self,
         lora_path: str,
         strength: float,
         name: str,
     ) -> LoRAInfo:
-        """Load LoRA for native BFL SDK.
+        """Merge a LoRA directly into the native flux2 DiT weights.
+
+        Reads a ``.safetensors`` LoRA (PEFT or kohya format), maps each module to
+        the model's Linear weights, and applies ``W += scale * (B @ A)`` in place.
+        Original weights are backed up so :meth:`unfuse` restores exactly.
+
+        Args:
+            lora_path: Local ``.safetensors`` path.
+            strength: Strength multiplier (already range-validated by ``load``).
+            name: Name to register this LoRA under.
+
+        Returns:
+            LoRAInfo describing the merged LoRA (``fused=True``).
 
         Raises:
-            NotImplementedError: Native LoRA merging is not yet implemented.
-                Use backend="diffusers" instead.
+            RuntimeError: If the LoRA matched zero model modules (nothing applied).
         """
-        raise NotImplementedError(
-            "Native BFL SDK LoRA loading is not implemented. "
-            "The LoRA merge operation (W' = W + alpha * B @ A) requires "
-            "model-specific weight mapping that varies by architecture. "
-            "Please use backend='diffusers' for LoRA support. "
-            f"Attempted to load: {lora_path}"
+        from .lora_merge import (
+            apply_deltas_to_module,
+            merge_lora_into_state_dict,
+        )
+
+        module = self._resolve_native_module()
+        lora_state = self._read_lora_file(lora_path)
+
+        deltas, report = merge_lora_into_state_dict(
+            module.state_dict(), lora_state, strength
+        )
+
+        if report.low_match:
+            logger.warning(
+                "Native LoRA merge: %s. Most modules did NOT map onto the model "
+                "- check the LoRA key format / target architecture.",
+                report.summary(),
+            )
+        else:
+            logger.info("Native LoRA merge: %s", report.summary())
+        if report.unmatched:
+            logger.warning(
+                "Native LoRA: %d unmatched module(s), e.g. %s",
+                len(report.unmatched),
+                report.unmatched[:5],
+            )
+
+        if not report.matched:
+            raise RuntimeError(
+                f"Native LoRA merge matched 0 of {report.total} modules for "
+                f"'{lora_path}'. No weights changed. The key names likely do not "
+                f"correspond to this model's modules ({report.summary()})."
+            )
+
+        backups, applied = apply_deltas_to_module(module, deltas)
+        self._native_state[name] = {
+            "backups": backups,
+            "applied": applied,
+            "strength": strength,
+        }
+
+        return LoRAInfo(
+            name=name,
+            path=str(lora_path),
+            strength=strength,
+            backend="native",
+            fused=True,  # merged straight into the weights
+            matched=len(report.matched),
+            total=report.total,
         )
 
     def set_strength(self, name: str, strength: float):
@@ -229,9 +342,42 @@ class KleinLoRAManager:
 
             if adapter_names:
                 self.pipe.set_adapters(adapter_names, adapter_weights=adapter_weights)
+        elif self.backend == "native":
+            # Deltas are linear in strength: rescale the applied delta in place.
+            self._rescale_native(name, strength)
 
         info.strength = strength
         logger.info(f"Set LoRA {name} strength to {strength}")
+
+    def _rescale_native(self, name: str, strength: float):
+        """Re-merge a native LoRA at a new strength using stored backups.
+
+        The merge is linear in strength, so the new delta is the stored delta
+        scaled by ``new / old``. We restore from backup first, then re-apply, so
+        the result is exact regardless of how many times strength changes.
+        """
+        state = self._native_state.get(name)
+        if not state:
+            logger.warning(f"No native merge state for {name}; cannot set strength")
+            return
+        old = state.get("strength", 0.0)
+        module = self._resolve_native_module()
+        params = dict(module.named_parameters())
+        new_applied: Dict[str, "torch.Tensor"] = {}
+        with torch.no_grad():
+            for pname, original in state["backups"].items():
+                param = params.get(pname)
+                if param is None:
+                    continue
+                if old:
+                    delta = state["applied"][pname] * (strength / old)
+                else:
+                    # Was applied at strength 0 (no effect); nothing to scale from.
+                    delta = state["applied"][pname] * 0.0
+                param.copy_(original + delta)
+                new_applied[pname] = delta
+        state["applied"] = new_applied
+        state["strength"] = strength
 
     def fuse(self, name: str):
         """Fuse a LoRA into base model for faster inference.
@@ -251,6 +397,26 @@ class KleinLoRAManager:
             self.pipe.fuse_lora(lora_scale=info.strength)
             info.fused = True
             logger.info(f"Fused LoRA: {name}")
+        elif self.backend == "native":
+            # Native LoRAs are merged into the weights at load time. If a prior
+            # unfuse restored the weights, re-apply the stored delta.
+            self._refuse_native(name)
+            info.fused = True
+            logger.info(f"Re-fused native LoRA: {name}")
+
+    def _refuse_native(self, name: str):
+        """Re-apply a previously-unfused native LoRA from its stored delta."""
+        state = self._native_state.get(name)
+        if not state:
+            logger.warning(f"No native merge state for {name}; cannot fuse")
+            return
+        module = self._resolve_native_module()
+        params = dict(module.named_parameters())
+        with torch.no_grad():
+            for pname, delta in state["applied"].items():
+                param = params.get(pname)
+                if param is not None:
+                    param.add_(delta)
 
     def unfuse(self, name: str):
         """Unfuse a LoRA from base model.
@@ -270,6 +436,14 @@ class KleinLoRAManager:
             self.pipe.unfuse_lora()
             info.fused = False
             logger.info(f"Unfused LoRA: {name}")
+        elif self.backend == "native":
+            from .lora_merge import restore_module
+
+            state = self._native_state.get(name)
+            if state:
+                restore_module(self._resolve_native_module(), state["backups"])
+            info.fused = False
+            logger.info(f"Unfused native LoRA: {name} (weights restored)")
 
     def fuse_all(self):
         """Fuse all loaded LoRAs."""
@@ -302,6 +476,9 @@ class KleinLoRAManager:
                 self.pipe.unload_lora_weights()
             except Exception as e:
                 logger.warning(f"Could not unload LoRA weights: {e}")
+        elif self.backend == "native":
+            # Weights already restored by unfuse above; drop the backup tensors.
+            self._native_state.pop(name, None)
 
         del self.loaded_loras[name]
         logger.info(f"Unloaded LoRA: {name}")
@@ -343,6 +520,26 @@ def load_klein_lora(
     return manager
 
 
+def load_klein_lora_native(
+    pipe_or_model,
+    lora_path: Union[str, Path],
+    strength: float = 1.0,
+) -> KleinLoRAManager:
+    """Merge a LoRA into the native flux2 DiT weights (no diffusers needed).
+
+    Args:
+        pipe_or_model: ``Flux2Pipeline`` or a raw flux2 ``nn.Module``.
+        lora_path: Local ``.safetensors`` LoRA path.
+        strength: LoRA strength (0.0-2.0).
+
+    Returns:
+        KleinLoRAManager with the LoRA merged into the model weights.
+    """
+    manager = KleinLoRAManager(pipe_or_model, backend="native")
+    manager.load(lora_path, strength=strength)
+    return manager
+
+
 # Known good Klein LoRAs (community recommendations - Jan 2026)
 # Note: Verify paths on HuggingFace before use, community LoRAs may move
 RECOMMENDED_LORAS = {
@@ -365,5 +562,10 @@ __all__ = [
     "LoRAInfo",
     "KleinLoRAManager",
     "load_klein_lora",
+    "load_klein_lora_native",
+    "merge_lora_into_state_dict",
     "RECOMMENDED_LORAS",
 ]
+
+# Re-export the pure merge entrypoint for convenience / testing.
+from .lora_merge import merge_lora_into_state_dict  # noqa: E402,F401
