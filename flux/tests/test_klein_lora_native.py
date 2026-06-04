@@ -16,6 +16,7 @@ Covered:
 """
 
 import importlib.util
+import json
 import sys
 import types
 from pathlib import Path
@@ -293,3 +294,93 @@ def test_manager_native_zero_match_raises(tmp_path):
     manager = KleinLoRAManager(_FakePipe(module), backend="native")
     with pytest.raises(RuntimeError, match="matched 0"):
         manager.load(str(lora_file), strength=1.0)
+
+
+# --------------------------------------------------------------------------- #
+# alpha handling (PEFT alpha lives in adapter_config.json, not the weights)
+# --------------------------------------------------------------------------- #
+def test_alpha_override_scales_peft_without_in_weight_alpha():
+    state = {"x.weight": torch.zeros(6, 3)}
+    a, b = _peft_pair(6, 3, 2, seed=11)
+    lora_peft = {"x.lora_A.weight": a, "x.lora_B.weight": b}
+    rank = 2
+
+    d_default, _ = merge_lora_into_state_dict(state, lora_peft, 1.0)
+    # alpha_override = 2*rank -> scale doubles.
+    d_override, _ = merge_lora_into_state_dict(
+        state, lora_peft, 1.0, alpha_override=2 * rank
+    )
+    assert torch.allclose(d_override["x.weight"], 2.0 * d_default["x.weight"], atol=1e-6)
+
+    # In-weight kohya alpha still wins over the override.
+    lora_kohya = {
+        "x.lora_down.weight": a,
+        "x.lora_up.weight": b,
+        "x.alpha": torch.tensor(float(rank)),
+    }
+    d_kohya, _ = merge_lora_into_state_dict(
+        state, lora_kohya, 1.0, alpha_override=2 * rank
+    )
+    assert torch.allclose(d_kohya["x.weight"], d_default["x.weight"], atol=1e-6)
+
+
+def test_manager_native_reads_peft_alpha_from_config(tmp_path):
+    save_file = pytest.importorskip("safetensors.torch").save_file
+    module = _build_klein_like_module()
+    qkv_orig = module.double_blocks[0].img_attn.qkv.weight.detach().clone()
+
+    rank = 4
+    g = torch.Generator().manual_seed(12)
+    a = torch.randn(rank, 8, generator=g)    # lora_A (rank, in)
+    b = torch.randn(24, rank, generator=g)   # lora_B (out, rank)
+    lora_state = {
+        "transformer.double_blocks.0.img_attn.qkv.lora_A.weight": a,
+        "transformer.double_blocks.0.img_attn.qkv.lora_B.weight": b,
+    }
+    lora_file = tmp_path / "peft_lora.safetensors"
+    save_file(lora_state, str(lora_file))
+    # PEFT keeps lora_alpha in adapter_config.json (here 2*rank -> scale 2).
+    (tmp_path / "adapter_config.json").write_text(
+        json.dumps({"lora_alpha": 2 * rank, "r": rank})
+    )
+
+    manager = KleinLoRAManager(_FakePipe(module), backend="native")
+    manager.load(str(lora_file), strength=1.0)
+    applied = (module.double_blocks[0].img_attn.qkv.weight - qkv_orig).float()
+    expected = (2 * rank / rank) * (b.float() @ a.float())
+    assert torch.allclose(applied, expected, atol=1e-4)
+
+
+def test_native_unfuse_set_strength_fuse_no_double_apply(tmp_path):
+    save_file = pytest.importorskip("safetensors.torch").save_file
+    module = _build_klein_like_module()
+    qkv_orig = module.double_blocks[0].img_attn.qkv.weight.detach().clone()
+
+    rank = 4
+    g = torch.Generator().manual_seed(13)
+    down = torch.randn(rank, 8, generator=g)
+    up = torch.randn(24, rank, generator=g)
+    lora_state = {
+        "lora_unet_double_blocks_0_img_attn_qkv.lora_down.weight": down,
+        "lora_unet_double_blocks_0_img_attn_qkv.lora_up.weight": up,
+        "lora_unet_double_blocks_0_img_attn_qkv.alpha": torch.tensor(float(rank)),
+    }
+    lora_file = tmp_path / "k.safetensors"
+    save_file(lora_state, str(lora_file))
+
+    manager = KleinLoRAManager(_FakePipe(module), backend="native")
+    info = manager.load(str(lora_file), strength=1.0)
+    full = up.float() @ down.float()  # alpha == rank -> scale == strength
+
+    # Unfuse -> weights back to original.
+    manager.unfuse(info.name)
+    assert torch.equal(module.double_blocks[0].img_attn.qkv.weight, qkv_orig)
+
+    # set_strength while unfused must NOT touch weights (no premature re-apply).
+    manager.set_strength(info.name, 0.5)
+    assert torch.equal(module.double_blocks[0].img_attn.qkv.weight, qkv_orig)
+
+    # Re-fuse -> applies exactly 0.5x (not 1.5x): no double-apply.
+    manager.fuse(info.name)
+    applied = (module.double_blocks[0].img_attn.qkv.weight - qkv_orig).float()
+    assert torch.allclose(applied, 0.5 * full, atol=1e-3)

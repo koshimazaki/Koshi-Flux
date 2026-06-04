@@ -101,6 +101,7 @@ class KleinLoRAManager:
         strength: float = 1.0,
         name: Optional[str] = None,
         adapter_name: Optional[str] = None,
+        alpha: Optional[float] = None,
     ) -> LoRAInfo:
         """Load a LoRA.
 
@@ -109,6 +110,9 @@ class KleinLoRAManager:
             strength: LoRA strength/scale (0.0-2.0, 1.0 = full effect)
             name: Optional name for this LoRA
             adapter_name: Adapter name for diffusers (auto-generated if None)
+            alpha: Native PEFT alpha override (per-adapter ``lora_alpha``). If
+                None, native load auto-reads it from an adjacent
+                ``adapter_config.json``. Ignored by the diffusers backend.
 
         Returns:
             LoRAInfo with loaded LoRA details
@@ -129,7 +133,7 @@ class KleinLoRAManager:
         if self.backend == "diffusers":
             info = self._load_diffusers(lora_path, strength, name, adapter_name)
         else:
-            info = self._load_native(lora_path, strength, name)
+            info = self._load_native(lora_path, strength, name, alpha=alpha)
 
         self.loaded_loras[name] = info
         logger.info(f"Loaded LoRA: {name} (strength={strength})")
@@ -235,11 +239,30 @@ class KleinLoRAManager:
             )
         return load_file(str(path))
 
+    def _read_peft_alpha(self, lora_path: str) -> Optional[float]:
+        """Read ``lora_alpha`` from a PEFT ``adapter_config.json`` next to the file.
+
+        PEFT/diffusers LoRAs store ``lora_alpha`` in their adapter config rather
+        than the weights; without it a non-default alpha would silently mis-scale
+        the merge. Returns the alpha as a float, or None if no config/key exists.
+        """
+        try:
+            import json
+            config = Path(lora_path).parent / "adapter_config.json"
+            if config.is_file():
+                value = json.loads(config.read_text()).get("lora_alpha")
+                if value is not None:
+                    return float(value)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("Could not read adapter_config.json alpha: %s", exc)
+        return None
+
     def _load_native(
         self,
         lora_path: str,
         strength: float,
         name: str,
+        alpha: Optional[float] = None,
     ) -> LoRAInfo:
         """Merge a LoRA directly into the native flux2 DiT weights.
 
@@ -266,9 +289,15 @@ class KleinLoRAManager:
         module = self._resolve_native_module()
         lora_state = self._read_lora_file(lora_path)
 
+        # PEFT/diffusers LoRAs keep lora_alpha in adapter_config.json (not the
+        # weights); use it (or an explicit override) so a non-default alpha is not
+        # silently mis-scaled. kohya alpha (in-weight) still takes precedence.
+        alpha_override = alpha if alpha is not None else self._read_peft_alpha(lora_path)
         deltas, report = merge_lora_into_state_dict(
-            module.state_dict(), lora_state, strength
+            module.state_dict(), lora_state, strength, alpha_override=alpha_override
         )
+        if alpha_override is not None:
+            logger.info("Native LoRA alpha override: %s", alpha_override)
 
         if report.low_match:
             logger.warning(
@@ -350,32 +379,36 @@ class KleinLoRAManager:
         logger.info(f"Set LoRA {name} strength to {strength}")
 
     def _rescale_native(self, name: str, strength: float):
-        """Re-merge a native LoRA at a new strength using stored backups.
+        """Rescale a native LoRA's stored delta to a new strength.
 
         The merge is linear in strength, so the new delta is the stored delta
-        scaled by ``new / old``. We restore from backup first, then re-apply, so
-        the result is exact regardless of how many times strength changes.
+        scaled by ``new / old``. Model weights are only touched when the LoRA is
+        currently fused; when it is unfused the weights stay at their originals and
+        we just update the stored delta + strength, so a later ``fuse()`` applies
+        the right amount (prevents an unfuse -> set_strength -> fuse double-apply).
         """
         state = self._native_state.get(name)
         if not state:
             logger.warning(f"No native merge state for {name}; cannot set strength")
             return
         old = state.get("strength", 0.0)
-        module = self._resolve_native_module()
-        params = dict(module.named_parameters())
-        new_applied: Dict[str, "torch.Tensor"] = {}
-        with torch.no_grad():
-            for pname, original in state["backups"].items():
-                param = params.get(pname)
-                if param is None:
-                    continue
-                if old:
-                    delta = state["applied"][pname] * (strength / old)
-                else:
-                    # Was applied at strength 0 (no effect); nothing to scale from.
-                    delta = state["applied"][pname] * 0.0
-                param.copy_(original + delta)
-                new_applied[pname] = delta
+        if not old:
+            logger.warning(
+                "Native LoRA %s was applied at strength 0; cannot rescale to %s "
+                "(reload at the desired strength).", name, strength
+            )
+        factor = (strength / old) if old else 0.0
+        new_applied: Dict[str, "torch.Tensor"] = {
+            pname: tensor * factor for pname, tensor in state["applied"].items()
+        }
+        if self.loaded_loras[name].fused:
+            module = self._resolve_native_module()
+            params = dict(module.named_parameters())
+            with torch.no_grad():
+                for pname, original in state["backups"].items():
+                    param = params.get(pname)
+                    if param is not None and pname in new_applied:
+                        param.copy_(original + new_applied[pname])
         state["applied"] = new_applied
         state["strength"] = strength
 

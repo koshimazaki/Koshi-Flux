@@ -201,6 +201,7 @@ def merge_lora_into_state_dict(
     model_state: Dict[str, torch.Tensor],
     lora_state: Dict[str, torch.Tensor],
     strength: float = 1.0,
+    alpha_override: float | None = None,
 ) -> Tuple[Dict[str, torch.Tensor], MergeReport]:
     """Compute per-weight LoRA deltas for a native model state dict.
 
@@ -212,6 +213,10 @@ def merge_lora_into_state_dict(
         model_state: ``module.state_dict()`` of the target model.
         lora_state: Flat LoRA tensor dict (PEFT or kohya format).
         strength: User strength multiplier (typically 0.0-2.0).
+        alpha_override: Alpha for pairs that carry no in-weight ``.alpha`` (i.e.
+            PEFT/diffusers LoRAs, whose ``lora_alpha`` lives in
+            ``adapter_config.json``). In-weight kohya alpha always wins; when both
+            are absent alpha defaults to ``rank`` (scale == strength).
 
     Returns:
         ``(deltas, report)``. ``deltas`` maps model weight name -> float32 delta
@@ -246,7 +251,12 @@ def merge_lora_into_state_dict(
             continue
 
         rank = down.shape[0]
-        alpha = pair.alpha if pair.alpha is not None else float(rank)
+        if pair.alpha is not None:
+            alpha = pair.alpha               # in-weight alpha (kohya) wins
+        elif alpha_override is not None:
+            alpha = float(alpha_override)     # PEFT alpha from config / caller
+        else:
+            alpha = float(rank)              # default -> scale == strength
         scale = strength * (alpha / rank if rank else 0.0)
         delta = scale * (up @ down)
 
