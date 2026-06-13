@@ -54,6 +54,9 @@ _KNOWN_PREFIXES = (
     "lora_",
 )
 
+# Prefixes added by wrappers such as torch.compile or DistributedDataParallel.
+_MODEL_WRAPPER_PREFIXES = ("_orig_mod.", "module.")
+
 # Warn when fewer than this fraction of LoRA modules map onto the model.
 LOW_MATCH_WARN_FRACTION = 0.5
 
@@ -76,10 +79,28 @@ def _squash(name: str) -> str:
 
 
 def _strip_lora_prefix(name: str) -> str:
-    """Remove a single known trainer prefix from a LoRA module name."""
-    for prefix in _KNOWN_PREFIXES:
-        if name.startswith(prefix):
-            return name[len(prefix):]
+    """Remove known trainer prefixes from a LoRA module name."""
+    changed = True
+    while changed:
+        changed = False
+        for prefix in _KNOWN_PREFIXES:
+            if name.startswith(prefix):
+                name = name[len(prefix):]
+                changed = True
+                break
+    return name
+
+
+def _strip_model_wrapper_prefix(name: str) -> str:
+    """Remove wrapper prefixes while keeping the real state-dict key intact."""
+    changed = True
+    while changed:
+        changed = False
+        for prefix in _MODEL_WRAPPER_PREFIXES:
+            if name.startswith(prefix):
+                name = name[len(prefix):]
+                changed = True
+                break
     return name
 
 
@@ -155,7 +176,8 @@ def build_model_weight_index(
             continue
         if not hasattr(tensor, "ndim") or tensor.ndim != 2:
             continue  # Linear only; conv/other handled by caller as unsupported.
-        squashed = _squash(key[: -len(".weight")])
+        module_name = _strip_model_wrapper_prefix(key[: -len(".weight")])
+        squashed = _squash(module_name)
         if squashed in index and index[squashed] != key:
             ambiguous.add(squashed)
         else:

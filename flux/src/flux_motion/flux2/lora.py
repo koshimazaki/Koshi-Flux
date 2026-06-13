@@ -405,10 +405,10 @@ class KleinLoRAManager:
             module = self._resolve_native_module()
             params = dict(module.named_parameters())
             with torch.no_grad():
-                for pname, original in state["backups"].items():
+                for pname, old_delta in state["applied"].items():
                     param = params.get(pname)
                     if param is not None and pname in new_applied:
-                        param.copy_(original + new_applied[pname])
+                        param.add_(new_applied[pname] - old_delta)
         state["applied"] = new_applied
         state["strength"] = strength
 
@@ -470,13 +470,40 @@ class KleinLoRAManager:
             info.fused = False
             logger.info(f"Unfused LoRA: {name}")
         elif self.backend == "native":
-            from .lora_merge import restore_module
-
             state = self._native_state.get(name)
             if state:
-                restore_module(self._resolve_native_module(), state["backups"])
+                self._subtract_native(name)
             info.fused = False
-            logger.info(f"Unfused native LoRA: {name} (weights restored)")
+            logger.info(f"Unfused native LoRA: {name} (delta removed)")
+
+    def _subtract_native(self, name: str):
+        """Remove a fused native LoRA by subtracting only its stored delta."""
+        state = self._native_state.get(name)
+        if not state:
+            logger.warning(f"No native merge state for {name}; cannot unfuse")
+            return
+        module = self._resolve_native_module()
+        params = dict(module.named_parameters())
+        with torch.no_grad():
+            for pname, delta in state["applied"].items():
+                param = params.get(pname)
+                if param is None:
+                    continue
+                param.sub_(delta)
+                if not self._other_fused_native_uses(name, pname):
+                    original = state.get("backups", {}).get(pname)
+                    if original is not None:
+                        param.copy_(original)
+
+    def _other_fused_native_uses(self, name: str, param_name: str) -> bool:
+        """Whether another fused native LoRA still contributes to ``param_name``."""
+        for other_name, other_info in self.loaded_loras.items():
+            if other_name == name or not other_info.fused:
+                continue
+            other_state = self._native_state.get(other_name)
+            if other_state and param_name in other_state.get("applied", {}):
+                return True
+        return False
 
     def fuse_all(self):
         """Fuse all loaded LoRAs."""

@@ -7,7 +7,7 @@ FLUX.1 (16 channels) and FLUX.2 (128 channels).
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Any, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -18,7 +18,6 @@ from flux_motion.core import (
     MotionProcessingError,
     get_logger,
     log_performance,
-    log_memory_usage,
 )
 
 
@@ -224,7 +223,7 @@ class BaseFluxMotionEngine(ABC, nn.Module):
             raise MotionProcessingError(
                 f"Motion application failed: {e}",
                 motion_params=motion_params
-            )
+            ) from e
     
     def _apply_motion_sequence(
         self,
@@ -309,10 +308,18 @@ class BaseFluxMotionEngine(ABC, nn.Module):
         if zoom == 1.0 and angle == 0.0 and tx == 0.0 and ty == 0.0:
             return latent
 
+        original_dtype = latent.dtype
+        sample_dtype = (
+            torch.float32
+            if latent.device.type == "cpu" and latent.dtype in (torch.float16, torch.bfloat16)
+            else latent.dtype
+        )
+        sample_latent = latent.to(dtype=sample_dtype)
+
         # Capture input statistics BEFORE transform (for normalization)
         if normalize_output:
-            input_mean = latent.mean(dim=(2, 3), keepdim=True)
-            input_std = latent.std(dim=(2, 3), keepdim=True) + 1e-6
+            input_mean = sample_latent.mean(dim=(2, 3), keepdim=True)
+            input_std = sample_latent.std(dim=(2, 3), keepdim=True) + 1e-6
 
         # Convert angle to radians - use tensor operations on device
         angle_rad = angle * np.pi / 180.0
@@ -330,18 +337,18 @@ class BaseFluxMotionEngine(ABC, nn.Module):
         theta = torch.tensor([
             [inv_zoom * cos_angle, -inv_zoom * sin_angle, tx / width * 2],
             [inv_zoom * sin_angle,  inv_zoom * cos_angle, ty / height * 2]
-        ], device=latent.device, dtype=latent.dtype)
+        ], device=latent.device, dtype=sample_dtype)
 
         # Expand for batch
         theta = theta.unsqueeze(0).expand(batch_size, -1, -1)
 
         # Create sampling grid
-        grid = F.affine_grid(theta, latent.size(), align_corners=False)
+        grid = F.affine_grid(theta, sample_latent.size(), align_corners=False)
 
         # Apply transformation with reflection padding (classic Deforum behavior)
         # Use bicubic for sharper results (bilinear causes blur on zoom)
         transformed = F.grid_sample(
-            latent, grid,
+            sample_latent, grid,
             mode='bicubic',
             padding_mode='reflection',
             align_corners=False
@@ -355,7 +362,7 @@ class BaseFluxMotionEngine(ABC, nn.Module):
             output_std = transformed.std(dim=(2, 3), keepdim=True) + 1e-6
             transformed = (transformed - output_mean) / output_std * input_std + input_mean
 
-        return transformed
+        return transformed.to(dtype=original_dtype)
     
     # =========================================================================
     # Utility Methods

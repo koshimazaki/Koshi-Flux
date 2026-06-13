@@ -222,7 +222,7 @@ with GenerationContext(args.output) as gen:
         else:
             # Deforum feedback: warp prev_gen along the input video's motion
             flow = optical_flow(prev_input, frame)
-            warped = warp(prev_gen, flow)
+            warped = warp(prev_gen.resize(frame.size), flow)
 
             # Optionally pull back toward the actual input frame
             source = blend(frame, warped, args.video_blend) if args.video_blend > 0 else warped

@@ -136,6 +136,23 @@ def test_forced_driver_falls_back_to_available_data():
     assert result.driver == "markers"
 
 
+def test_marker_only_schedule_uses_absolute_clip_time():
+    marker_tracks = tracks_from_analysis_json({"kick_times": [1.0], "duration": 4.0})
+    result = build_audio_motion_schedule(
+        marker_tracks,
+        40,
+        10.0,
+        feature="markers",
+        zoom_gain=0.3,
+        smoothing=0.0,
+    )
+
+    assert result.driver == "markers"
+    assert result.bands["low"][0] == 0.0
+    assert int(np.argmax(result.bands["low"])) == 10
+    assert result.values["zoom"][10] > result.values["zoom"][0]
+
+
 def test_waveform_audio_path_uses_numpy_stft():
     sample_rate = 22050
     seconds = 2.0

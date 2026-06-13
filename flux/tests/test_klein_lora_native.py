@@ -102,6 +102,26 @@ def test_peft_keys_map_and_delta_matches():
     assert deltas[key].shape == state[key].shape
 
 
+def test_peft_keys_map_through_nested_and_compiled_prefixes():
+    state = {"_orig_mod.double_blocks.0.img_attn.qkv.weight": torch.zeros(24, 8)}
+    rank = 4
+    a, b = _peft_pair(24, 8, rank, seed=16)
+    lora_state = {
+        "base_model.model.transformer.double_blocks.0.img_attn.qkv.lora_A.weight": a,
+        "base_model.model.transformer.double_blocks.0.img_attn.qkv.lora_B.weight": b,
+    }
+
+    deltas, report = merge_lora_into_state_dict(state, lora_state, strength=1.0)
+
+    key = "_orig_mod.double_blocks.0.img_attn.qkv.weight"
+    assert report.matched == [
+        "base_model.model.transformer.double_blocks.0.img_attn.qkv"
+    ]
+    assert report.unmatched == []
+    assert key in deltas
+    assert torch.allclose(deltas[key], b @ a, atol=1e-5)
+
+
 def test_kohya_keys_map_with_alpha():
     state = _model_state()
     rank = 4
@@ -384,3 +404,53 @@ def test_native_unfuse_set_strength_fuse_no_double_apply(tmp_path):
     manager.fuse(info.name)
     applied = (module.double_blocks[0].img_attn.qkv.weight - qkv_orig).float()
     assert torch.allclose(applied, 0.5 * full, atol=1e-3)
+
+
+def test_manager_native_stacked_loras_preserve_each_other_on_unfuse(tmp_path):
+    save_file = pytest.importorskip("safetensors.torch").save_file
+    module = _build_klein_like_module()
+    qkv_orig = module.double_blocks[0].img_attn.qkv.weight.detach().clone()
+
+    def make_lora(path: Path, seed: int):
+        rank = 4
+        g = torch.Generator().manual_seed(seed)
+        down = torch.randn(rank, 8, generator=g)
+        up = torch.randn(24, rank, generator=g)
+        save_file(
+            {
+                "lora_unet_double_blocks_0_img_attn_qkv.lora_down.weight": down,
+                "lora_unet_double_blocks_0_img_attn_qkv.lora_up.weight": up,
+                "lora_unet_double_blocks_0_img_attn_qkv.alpha": torch.tensor(float(rank)),
+            },
+            str(path),
+        )
+        return up.float() @ down.float()
+
+    delta_a = make_lora(tmp_path / "style_a.safetensors", seed=14)
+    delta_b = make_lora(tmp_path / "style_b.safetensors", seed=15)
+
+    manager = KleinLoRAManager(_FakePipe(module), backend="native")
+    info_a = manager.load(str(tmp_path / "style_a.safetensors"), strength=1.0)
+    info_b = manager.load(str(tmp_path / "style_b.safetensors"), strength=0.25)
+
+    applied = (module.double_blocks[0].img_attn.qkv.weight - qkv_orig).float()
+    assert torch.allclose(applied, delta_a + 0.25 * delta_b, atol=1e-3)
+
+    manager.set_strength(info_a.name, 0.5)
+    applied = (module.double_blocks[0].img_attn.qkv.weight - qkv_orig).float()
+    assert torch.allclose(applied, 0.5 * delta_a + 0.25 * delta_b, atol=1e-3)
+
+    manager.unfuse(info_a.name)
+    applied = (module.double_blocks[0].img_attn.qkv.weight - qkv_orig).float()
+    assert torch.allclose(applied, 0.25 * delta_b, atol=1e-3)
+
+    manager.fuse(info_a.name)
+    applied = (module.double_blocks[0].img_attn.qkv.weight - qkv_orig).float()
+    assert torch.allclose(applied, 0.5 * delta_a + 0.25 * delta_b, atol=1e-3)
+
+    manager.unload(info_b.name)
+    applied = (module.double_blocks[0].img_attn.qkv.weight - qkv_orig).float()
+    assert torch.allclose(applied, 0.5 * delta_a, atol=1e-3)
+
+    manager.unfuse(info_a.name)
+    assert torch.equal(module.double_blocks[0].img_attn.qkv.weight, qkv_orig)

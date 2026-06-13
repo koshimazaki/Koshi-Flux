@@ -173,7 +173,7 @@ def frame_bands(
             ),
         }
     elif mode == "markers" and has_markers:
-        bands = _bands_from_markers(tracks.markers, num_frames)
+        bands = _bands_from_markers(tracks.markers, num_frames, tracks.duration)
     else:
         logger.warning(
             "No usable feature data for driver '%s'; emitting a flat schedule.",
@@ -202,7 +202,7 @@ def to_deforum_string(values: Union[List[float], np.ndarray], decimals: int = 3)
 
 
 def _bands_from_markers(
-    markers: List[Dict[str, Any]], num_frames: int
+    markers: List[Dict[str, Any]], num_frames: int, duration: float = 0.0
 ) -> Dict[str, np.ndarray]:
     if not markers:
         return {
@@ -219,11 +219,16 @@ def _bands_from_markers(
     )
     order = np.argsort(times)
     times = times[order]
-    t_min, t_max = float(times[0]), float(times[-1])
-    if t_max <= t_min or num_frames == 1:
+    if num_frames == 1:
         positions = np.zeros(times.size, dtype=float)
+    elif duration > 0:
+        positions = np.clip(times / float(duration) * (num_frames - 1), 0.0, num_frames - 1)
     else:
-        positions = (times - t_min) / (t_max - t_min) * (num_frames - 1)
+        t_min, t_max = float(times[0]), float(times[-1])
+        if t_max <= t_min:
+            positions = np.zeros(times.size, dtype=float)
+        else:
+            positions = (times - t_min) / (t_max - t_min) * (num_frames - 1)
 
     frame_axis = np.arange(num_frames, dtype=float)
     output: Dict[str, np.ndarray] = {}
@@ -233,9 +238,10 @@ def _bands_from_markers(
             dtype=float,
         )
         if values.size == 1:
-            output[key] = np.full(num_frames, float(values[0]), dtype=float)
+            output[key] = np.zeros(num_frames, dtype=float)
+            output[key][int(round(float(positions[0])))] = float(values[0])
         else:
-            output[key] = np.interp(frame_axis, positions, values)
+            output[key] = np.interp(frame_axis, positions, values, left=0.0, right=0.0)
     return output
 
 
