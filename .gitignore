@@ -27,3 +27,6 @@ venv/
 *.egg-info/
 dist/
 build/
+
+# Local MCP/server logs
+logs/
