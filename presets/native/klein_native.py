@@ -21,15 +21,11 @@ from klein_utils import GenerationContext  # ENFORCED: Always save settings JSON
 import cv2
 import numpy as np
 import torch
-import torchvision.transforms as T
 from PIL import Image
 from tqdm import tqdm
 
-# BFL native imports
-from flux2.util import load_ae, load_flow_model, load_text_encoder
-from flux2.sampling import (
-    prc_img, prc_txt, denoise, get_schedule, scatter_ids, default_prep
-)
+# Shared pure-BFL pipeline (extracted so all native presets use one implementation)
+from native_utils import NativePipeline
 
 
 def parse_args():
@@ -120,140 +116,10 @@ def match_color_lab(img: Image.Image, ref: Image.Image) -> Image.Image:
     return Image.fromarray(result)
 
 
-def pil_to_tensor(img: Image.Image) -> torch.Tensor:
-    """PIL Image to tensor [-1, 1]."""
-    t = T.ToTensor()(img)
-    return (2 * t - 1).unsqueeze(0)  # (1, 3, H, W)
-
-
-def tensor_to_pil(t: torch.Tensor) -> Image.Image:
-    """Tensor [-1, 1] to PIL Image."""
-    t = (t.clamp(-1, 1) + 1) / 2  # [0, 1]
-    t = t.squeeze(0).cpu()
-    return T.ToPILImage()(t)
-
-
-class NativePipeline:
-    """Pure BFL/PyTorch pipeline."""
-
-    def __init__(self, model_name: str = "flux.2-klein-4b", device: str = "cuda"):
-        self.device = device
-        self.model_name = model_name
-
-        tqdm.write(f"Loading BFL native components: {model_name}")
-
-        # Load BFL VAE with proper BatchNorm stats
-        self.ae = load_ae(model_name, device=device)
-        self.ae.eval()
-
-        # Load BFL DiT
-        self.model = load_flow_model(model_name, device=device)
-        self.model.eval()
-
-        # Load text encoder
-        self.text_enc = load_text_encoder(model_name, device=device)
-
-        tqdm.write("Native pipeline ready")
-
-    @torch.no_grad()
-    def encode(self, img: Image.Image) -> torch.Tensor:
-        """Encode image to latent with BFL VAE."""
-        # Prep image (crop to multiple of 16)
-        img_tensor = default_prep(img, limit_pixels=1024**2, ensure_multiple=16)
-        if isinstance(img_tensor, list):
-            img_tensor = img_tensor[0]
-        img_tensor = img_tensor.unsqueeze(0).to(self.device)
-
-        # Encode with proper BatchNorm
-        z = self.ae.encode(img_tensor)
-        return z
-
-    @torch.no_grad()
-    def decode(self, z: torch.Tensor) -> Image.Image:
-        """Decode latent to image with BFL VAE."""
-        img_tensor = self.ae.decode(z)
-        img_tensor = img_tensor.clamp(-1, 1)
-        return tensor_to_pil(img_tensor)
-
-    @torch.no_grad()
-    def encode_prompt(self, prompt: str) -> tuple:
-        """Encode text prompt."""
-        txt_emb = self.text_enc.encode(prompt)
-        if isinstance(txt_emb, tuple):
-            txt_emb = txt_emb[0]
-        txt_tokens, txt_ids = prc_txt(txt_emb[0])
-        return txt_tokens.unsqueeze(0).to(self.device), txt_ids.unsqueeze(0).to(self.device)
-
-    @torch.no_grad()
-    def generate(
-        self,
-        img: Image.Image,
-        prompt: str,
-        strength: float = 0.3,
-        num_steps: int = 4,
-        guidance: float = 1.0,
-        seed: int = 42,
-    ) -> Image.Image:
-        """Generate image with native BFL pipeline."""
-        torch.manual_seed(seed)
-
-        # Encode image
-        z = self.encode(img)  # (1, 128, H/16, W/16)
-
-        # Prep image tokens with position IDs
-        img_tokens, img_ids = prc_img(z[0])
-        img_tokens = img_tokens.unsqueeze(0).to(self.device, dtype=torch.bfloat16)
-        img_ids = img_ids.unsqueeze(0).to(self.device)
-
-        # Encode prompt
-        txt_tokens, txt_ids = self.encode_prompt(prompt)
-        txt_tokens = txt_tokens.to(dtype=torch.bfloat16)
-
-        # Get schedule (mu-shifted for resolution)
-        seq_len = img_tokens.shape[1]
-        full_timesteps = get_schedule(num_steps, seq_len)
-
-        # Calculate start step based on strength
-        # strength=1.0 -> start from pure noise (step 0)
-        # strength=0.0 -> no change (skip all)
-        start_step = int(num_steps * (1.0 - strength))
-        timesteps = full_timesteps[start_step:]
-
-        if len(timesteps) <= 1:
-            # No denoising needed
-            return self.decode(z)
-
-        # Add noise based on starting timestep
-        t_start = timesteps[0]
-        noise = torch.randn_like(img_tokens)
-
-        # Rectified flow: x_t = (1-t)*img + t*noise
-        noised = (1 - t_start) * img_tokens + t_start * noise
-
-        # Denoise
-        out_tokens = denoise(
-            model=self.model,
-            img=noised,
-            img_ids=img_ids,
-            txt=txt_tokens,
-            txt_ids=txt_ids,
-            timesteps=timesteps,
-            guidance=guidance,
-        )
-
-        # Scatter back to spatial
-        out_list = scatter_ids(out_tokens, img_ids)
-        out_z = out_list[0].squeeze(2)  # Remove time dim -> (1, 128, H, W)
-
-        # Decode
-        return self.decode(out_z)
-
-
 def main():
     args = parse_args()
 
     frames, fps = load_video(args.input, max_frames=args.max_frames)
-    num_frames = len(frames)
 
     # ENFORCED: GenerationContext guarantees JSON is saved (even on crash)
     with GenerationContext(args.output) as gen:
@@ -288,9 +154,11 @@ def main():
                 )
                 anchor = img
             else:
-                # Warp previous generation
+                # Warp previous generation (resize: decoded size differs from
+                # frame size on 1080p/non-/16 inputs - warping a smaller image
+                # through a full-size flow grid distorts the feedback)
                 flow = optical_flow(prev_input, frame)
-                warped = warp(prev_gen, flow)
+                warped = warp(prev_gen.resize(frame.size), flow)
 
                 # Generate
                 img = pipe.generate(

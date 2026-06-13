@@ -43,15 +43,30 @@ Full **diffusers** pipeline (`FluxPipeline`, `FluxImg2ImgPipeline`). Simple, sta
 | `klein_v2v_motion` | + Optical flow |
 | `klein_v2v_temporal` | + Frame blending |
 | `klein_v2v_ultimate` | Motion + temporal |
-| `klein_v2v_deforum` | + Motion schedules |
-| `klein_hybrid_deforum` | FeedbackProcessor |
+| `klein_v2v_deforum` | + Motion schedules (latent space) |
+| `klein_v2v_audio_deforum` | **Audio-driven Deforum**: flow warp + audio→schedules in latent space + LoRA + mux |
+| `klein_hybrid_deforum` | FeedbackProcessor + warped noise |
 
 ### native/
-**Pure BFL SDK** - no diffusers. Uses `load_ae()` with BatchNorm stats.
+**Pure BFL SDK** - no diffusers. Uses `load_ae()` with BatchNorm stats via the
+shared `native_utils.NativePipeline`. **NATIVE-FIRST: this is the preferred
+lane** - use native presets by default; hybrid twins exist for A/B comparison.
+
+The `klein_v2v_*` presets are **native twins** of their `hybrid-v2v/`
+counterparts: identical CLI + defaults, only the pipeline differs - run both
+with the same settings to A/B the VAE/latent path (diffusers VAE vs BFL AE).
 
 | Preset | Features |
 |--------|----------|
-| `klein_native` | Pure BFL V2V |
+| `klein_native` | Pure BFL V2V (flow warp + LAB anchor) |
+| `klein_v2v_audio` | Audio-reactive: audio/dashboard-JSON/feature-video → motion schedules, LoRA, audio mux. NOTE: runs the *hybrid* `Flux2Pipeline` despite living here |
+| `klein_v2v_deforum` | Native twin of hybrid deforum: flow warp + motion schedules in latent space (Flux2MotionEngine via `NativePipeline.generate_from_latent(motion_params=...)`) |
+| `klein_v2v_audio_deforum` | **FLAGSHIP (native)**: audio-driven Deforum - flow warp + audio→schedules in latent space + native LoRA + mux |
+| `klein_i2v_audio` | **I2V**: animate ONE still from audio alone - latent feedback loop, audio-driven motion + strength, native LoRA, mux. No driving video |
+| `klein_v2v_ramp` | Native twin of hybrid ramp (strength start→end) |
+| `klein_v2v_temporal` | Native twin of hybrid temporal (prev_gen blending) |
+| `klein_v2v_latent_ref` | Native twin of hybrid latent_ref (latent-space ref blend) |
+| `klein_v2v_latent_color` | Successor of hybrid `latent_ref_LAB` - latent color matching (ch 32-63), **no LAB involved** despite the old name |
 
 ## Quick Start
 
@@ -64,6 +79,10 @@ python presets/hybrid-v2v/klein_v2v_motion.py -i input.mp4 -p "oil painting"
 
 # Native (experimental)
 python presets/native/klein_native.py -i input.mp4 -p "watercolor"
+
+# A/B the VAE path: same settings, hybrid vs native twin
+python presets/hybrid-v2v/klein_v2v_ramp.py -i in.mp4 -p "oil painting" -o outputs/ramp_hybrid.mp4
+python presets/native/klein_v2v_ramp.py    -i in.mp4 -p "oil painting" -o outputs/ramp_native.mp4
 ```
 
 ## Comparison
