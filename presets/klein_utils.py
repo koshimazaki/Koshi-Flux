@@ -13,25 +13,51 @@ Usage:
 """
 import sys
 import json
+import os
 from pathlib import Path
 from datetime import datetime
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
-# Auto-detect workspace (RunPod) vs local
-WORKSPACE = Path("/workspace") if Path("/workspace").exists() else Path.cwd()
-sys.path.insert(0, str(WORKSPACE / "aimedia_hf"))
-sys.path.insert(0, str(WORKSPACE / "aimedia_hf/flux2/src"))
-sys.path.insert(0, str(WORKSPACE / "aimedia_hf/Deforum2026/flux/src"))
-sys.path.insert(0, str(WORKSPACE / "aimedia_hf/Deforum2026/core/src"))
+# Auto-detect workspace (RunPod) vs local, but anchor local paths to this repo
+# instead of the shell's current working directory.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+WORKSPACE = Path(os.environ.get("WORKSPACE", "/workspace"))
+if not WORKSPACE.exists():
+    WORKSPACE = REPO_ROOT
 
-import cv2
-import subprocess
-import numpy as np
-import torch
-from PIL import Image
-from tqdm import tqdm
+
+def _prepend_existing_paths(*paths: Path) -> None:
+    # Insert in reverse so the FIRST listed path wins on sys.path - otherwise
+    # each later insert(0) outranks earlier ones and stale /workspace copies
+    # (e.g. aimedia_hf) shadow the current checkout.
+    for path in reversed(paths):
+        if path.exists():
+            sys.path.insert(0, str(path))
+
+
+_prepend_existing_paths(
+    REPO_ROOT / "flux/src",
+    REPO_ROOT / "core/src",
+    REPO_ROOT.parent / "flux2-main/src",
+    WORKSPACE / "Koshi-Flux/flux/src",
+    WORKSPACE / "Koshi-Flux/core/src",
+    WORKSPACE / "flux2-main/src",
+    WORKSPACE / "Deforum2026/flux/src",
+    WORKSPACE / "Deforum2026/core/src",
+    WORKSPACE / "aimedia_hf",
+    WORKSPACE / "aimedia_hf/flux2/src",
+    WORKSPACE / "aimedia_hf/Deforum2026/flux/src",
+    WORKSPACE / "aimedia_hf/Deforum2026/core/src",
+)
+
+import cv2  # noqa: E402
+import subprocess  # noqa: E402
+import numpy as np  # noqa: E402
+import torch  # noqa: E402
+from PIL import Image  # noqa: E402
+from tqdm import tqdm  # noqa: E402,F401
 
 __version__ = "1.1.0"
 
@@ -133,7 +159,10 @@ def generation(output_path: str, **initial_params):
     ctx.update(**initial_params)
     try:
         yield ctx
-    finally:
+    except BaseException:
+        ctx.__exit__(*sys.exc_info())
+        raise
+    else:
         ctx.__exit__(None, None, None)
 
 
@@ -187,10 +216,18 @@ def save_video(frames: list, path: str, fps: float, temp_name: str = "temp", met
         cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18"]
         if has_audio:
             # Lay the source track back on so motion stays synced to the audio.
+            # "1:a:0?" = optional stream: a file without an audio stream degrades
+            # to a silent video instead of failing the whole render.
             cmd += ["-c:a", "aac", "-b:a", "192k",
-                    "-map", "0:v:0", "-map", "1:a:0", "-shortest"]
+                    "-map", "0:v:0", "-map", "1:a:0?", "-shortest"]
         cmd += [str(out_path)]
-        subprocess.run(cmd, capture_output=True, check=True)
+        try:
+            subprocess.run(cmd, capture_output=True, check=True)
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr or b"").decode(errors="replace")[-2000:]
+            raise RuntimeError(
+                f"ffmpeg failed (exit {exc.returncode}) writing {out_path}:\n{stderr}"
+            ) from exc
     finally:
         for f in temp_dir.glob("*.png"):
             f.unlink()

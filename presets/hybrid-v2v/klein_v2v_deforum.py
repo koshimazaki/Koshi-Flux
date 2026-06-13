@@ -17,6 +17,11 @@ Usage:
         -o output.mp4
 """
 import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from klein_utils import (
     load_video, match_color_lab, optical_flow, warp,
     get_pipeline, clear_cuda,

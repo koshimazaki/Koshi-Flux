@@ -2,6 +2,11 @@
 """Klein V2V Ramp - Strength ramps from start to end over frames."""
 import argparse
 import math
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from klein_utils import (
     load_video, match_color_lab, blend, get_pipeline, generate, clear_cuda, tqdm, Image,
     GenerationContext

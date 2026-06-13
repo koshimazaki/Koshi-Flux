@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Klein V2V Ultimate - Motion + Temporal + Init Image with enforced JSON metadata."""
 import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from klein_utils import (
     load_video, match_color_lab, blend, optical_flow, warp, get_pipeline, generate, clear_cuda, tqdm, Image,
     GenerationContext  # ENFORCED: Always save settings JSON

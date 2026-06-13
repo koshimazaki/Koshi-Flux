@@ -23,12 +23,14 @@ Usage:
 """
 import argparse
 import logging
+import sys
 from pathlib import Path
 
 import numpy as np
-import torch
 from PIL import Image
 from tqdm import tqdm
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from klein_utils import (
     load_video, optical_flow, warp, get_pipeline, clear_cuda,
@@ -122,11 +124,17 @@ def main():
             angle=args.angle,
             translation_x=args.translation_x,
             translation_y=args.translation_y,
+            translation_z=args.translation_z,
             sharpen=args.sharpen,
             noise=args.noise,
+            contrast=args.contrast,
             color_mode=args.color_mode,
             detect_issues=args.detect_issues,
             adaptive_strength=args.adaptive_strength,
+            burn_threshold=args.burn_threshold,
+            blur_threshold=args.blur_threshold,
+            warp_noise=args.warp_noise,
+            noise_blend=args.noise_blend,
             seed=args.seed,
             model="flux.2-klein-4b",
             steps=4,
@@ -157,6 +165,9 @@ def main():
 
         correction_config = AdaptiveCorrectionConfig(
             adaptive_strength=args.adaptive_strength,
+            # Anchor the adaptive curve to the user's --strength, not the config
+            # default (0.25) - otherwise --strength is silently ignored.
+            adaptive_strength_base=args.strength,
             burn_detection=args.detect_issues,
             blur_detection=args.detect_issues,
             burn_threshold=args.burn_threshold,
@@ -172,7 +183,6 @@ def main():
         noise_manager = WarpedNoiseManager(config=noise_config, seed=args.seed)
 
         output_frames = []
-        prev_latent = None
         prev_gen = None
         prev_input = None
         anchor_frame = None
@@ -252,7 +262,6 @@ def main():
                 )
 
             output_frames.append(img)
-            prev_latent = latent
             prev_gen = img
             prev_input = input_frame
 

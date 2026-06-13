@@ -265,7 +265,8 @@ def main():
     parser.add_argument("--mode", "-m", choices=["v2v", "hybrid", "motion"], default="v2v")
     parser.add_argument("--strength", "-s", type=float, default=0.65)
     parser.add_argument("--blend", "-b", type=float, default=0.3, help="Hybrid blend (input weight)")
-    parser.add_argument("--max-frames", type=int, default=30)
+    parser.add_argument("--max-frames", type=int, default=None,
+                        help="Limit frames (default: all frames - was 30, which silently truncated)")
     parser.add_argument("--width", type=int, default=768)
     parser.add_argument("--height", type=int, default=768)
     parser.add_argument("--fps", type=float, default=None, help="Output FPS (default: match input video)")

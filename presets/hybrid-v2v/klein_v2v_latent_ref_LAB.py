@@ -8,7 +8,13 @@ Latent color matching only adjusts channels 32-63 (color/lighting) while
 preserving structure channels (0-31) and texture channels (64-127).
 """
 import argparse
+import sys
+from pathlib import Path
+
 import torch
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from klein_utils import (
     load_video, blend, get_pipeline, clear_cuda, tqdm, Image,
     GenerationContext

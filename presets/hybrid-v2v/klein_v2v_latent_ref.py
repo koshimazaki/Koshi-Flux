@@ -4,7 +4,11 @@
 Unlike pixel blending, latent blending merges style at the semantic level.
 """
 import argparse
-import torch
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from klein_utils import (
     load_video, match_color_lab, blend, get_pipeline, clear_cuda, tqdm, Image,
     GenerationContext

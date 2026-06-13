@@ -19,8 +19,9 @@ import numpy as np
 from pathlib import Path
 
 # Add flux_motion to path
-SCRIPT_DIR = Path(__file__).parent.parent.parent
+SCRIPT_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SCRIPT_DIR / "flux/src"))
+sys.path.insert(0, str(SCRIPT_DIR / "core/src"))
 sys.path.insert(0, str(SCRIPT_DIR / "presets"))
 
 from flux_motion.audio import (  # noqa: E402
@@ -230,10 +231,20 @@ with GenerationContext(args.output) as gen:
         if anchor_latent is not None:
             latent = match_color_latent(latent, anchor_latent, (32, 64), 0.7)
 
+        if args.latent_motion:
+            latent_motion_params = motion_frame.to_dict()
+            if not args.no_pixel_zoom:
+                # Zoom was already applied in pixel space (apply_zoom above);
+                # neutralize it here or the latent engine applies it a second
+                # time (~zoom^2 of effective motion per frame).
+                latent_motion_params["zoom"] = 1.0
+        else:
+            latent_motion_params = {}
+
         img, out_latent = pipe._generate_motion_frame(
             prev_latent=latent,
             prompt=current_prompt,
-            motion_params=motion_frame.to_dict() if args.latent_motion else {},
+            motion_params=latent_motion_params,
             width=frame.width,
             height=frame.height,
             num_inference_steps=4,
